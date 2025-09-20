@@ -1,0 +1,2777 @@
+[
+  {
+    "id": 0,
+    "rgb": 2631719,
+    "hex": "#282827",
+    "textureId": 408,
+    "walkable": true,
+    "hsl": {
+      "h": 42,
+      "s": 3,
+      "l": 39
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 10259
+  },
+  {
+    "id": 1,
+    "rgb": 4473924,
+    "hex": "#444444",
+    "textureId": 501,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 68
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 34
+  },
+  {
+    "id": 2,
+    "rgb": 6710886,
+    "hex": "#666666",
+    "textureId": 408,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 102
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 51
+  },
+  {
+    "id": 3,
+    "rgb": 8947848,
+    "hex": "#888888",
+    "textureId": 501,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 136
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 68
+  },
+  {
+    "id": 4,
+    "rgb": 5979170,
+    "hex": "#5B3C22",
+    "textureId": 595,
+    "walkable": true,
+    "hsl": {
+      "h": 19,
+      "s": 116,
+      "l": 62
+    },
+    "hueMultiplier": 4,
+    "weightedHue": 57,
+    "minimapColor": 4511
+  },
+  {
+    "id": 5,
+    "rgb": 7509687,
+    "hex": "#7296B7",
+    "textureId": 1,
+    "walkable": true,
+    "hsl": {
+      "h": 148,
+      "s": 82,
+      "l": 148
+    },
+    "hueMultiplier": 40,
+    "weightedHue": 69,
+    "minimapColor": 38218
+  },
+  {
+    "id": 6,
+    "rgb": 0,
+    "hex": "#000000",
+    "textureId": 137,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 0
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 0
+  },
+  {
+    "id": 7,
+    "rgb": 5987163,
+    "hex": "#5B5B5B",
+    "textureId": 615,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 91
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 45
+  },
+  {
+    "id": 8,
+    "rgb": 16777205,
+    "hex": "#FFFFF5",
+    "textureId": 629,
+    "walkable": true,
+    "hsl": {
+      "h": 42,
+      "s": 213,
+      "l": 250
+    },
+    "hueMultiplier": 1,
+    "weightedHue": 10,
+    "minimapColor": 10365
+  },
+  {
+    "id": 9,
+    "rgb": 5263440,
+    "hex": "#505050",
+    "textureId": 499,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 80
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 40
+  },
+  {
+    "id": 10,
+    "rgb": 2236962,
+    "hex": "#222222",
+    "textureId": 616,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 34
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 17
+  },
+  {
+    "id": 11,
+    "rgb": 6708568,
+    "hex": "#665D58",
+    "textureId": 505,
+    "walkable": true,
+    "hsl": {
+      "h": 15,
+      "s": 18,
+      "l": 95
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 13,
+    "minimapColor": 3119
+  },
+  {
+    "id": 12,
+    "rgb": 10040115,
+    "hex": "#993333",
+    "textureId": 301,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 128,
+      "l": 102
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 102,
+    "minimapColor": 563
+  },
+  {
+    "id": 13,
+    "rgb": 4008715,
+    "hex": "#3D2B0B",
+    "textureId": 602,
+    "walkable": true,
+    "hsl": {
+      "h": 27,
+      "s": 177,
+      "l": 36
+    },
+    "hueMultiplier": 5,
+    "weightedHue": 50,
+    "minimapColor": 6802
+  },
+  {
+    "id": 14,
+    "rgb": 4008715,
+    "hex": "#3D2B0B",
+    "textureId": 154,
+    "walkable": true,
+    "hsl": {
+      "h": 27,
+      "s": 177,
+      "l": 36
+    },
+    "hueMultiplier": 5,
+    "weightedHue": 50,
+    "minimapColor": 6802
+  },
+  {
+    "id": 15,
+    "rgb": 6697728,
+    "hex": "#663300",
+    "textureId": 513,
+    "walkable": true,
+    "hsl": {
+      "h": 21,
+      "s": 255,
+      "l": 51
+    },
+    "hueMultiplier": 8,
+    "weightedHue": 102,
+    "minimapColor": 6041
+  },
+  {
+    "id": 16,
+    "rgb": 6697728,
+    "hex": "#663300",
+    "textureId": 513,
+    "walkable": true,
+    "hsl": {
+      "h": 21,
+      "s": 255,
+      "l": 51
+    },
+    "hueMultiplier": 8,
+    "weightedHue": 102,
+    "minimapColor": 6041
+  },
+  {
+    "id": 17,
+    "rgb": 204,
+    "hex": "#0000CC",
+    "textureId": 43,
+    "walkable": true,
+    "hsl": {
+      "h": 170,
+      "s": 255,
+      "l": 102
+    },
+    "hueMultiplier": 136,
+    "weightedHue": 204,
+    "minimapColor": 43955
+  },
+  {
+    "id": 18,
+    "rgb": 0,
+    "hex": "#000000",
+    "textureId": 31,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 0
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 0
+  },
+  {
+    "id": 19,
+    "rgb": 0,
+    "hex": "#000000",
+    "textureId": 15,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 0
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 0
+  },
+  {
+    "id": 20,
+    "rgb": 10053120,
+    "hex": "#996600",
+    "textureId": 99,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 255,
+      "l": 76
+    },
+    "hueMultiplier": 17,
+    "weightedHue": 153,
+    "minimapColor": 8102
+  },
+  {
+    "id": 21,
+    "rgb": 7166763,
+    "hex": "#6D5B2B",
+    "textureId": 181,
+    "walkable": true,
+    "hsl": {
+      "h": 31,
+      "s": 111,
+      "l": 76
+    },
+    "hueMultiplier": 8,
+    "weightedHue": 66,
+    "minimapColor": 7590
+  },
+  {
+    "id": 22,
+    "rgb": 7166763,
+    "hex": "#6D5B2B",
+    "textureId": 181,
+    "walkable": true,
+    "hsl": {
+      "h": 31,
+      "s": 111,
+      "l": 76
+    },
+    "hueMultiplier": 8,
+    "weightedHue": 66,
+    "minimapColor": 7590
+  },
+  {
+    "id": 23,
+    "rgb": 0,
+    "hex": "#000000",
+    "textureId": 47,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 0
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 0
+  },
+  {
+    "id": 24,
+    "rgb": 13351542,
+    "hex": "#CBBA76",
+    "textureId": 499,
+    "walkable": true,
+    "hsl": {
+      "h": 34,
+      "s": 113,
+      "l": 160
+    },
+    "hueMultiplier": 11,
+    "weightedHue": 85,
+    "minimapColor": 8656
+  },
+  {
+    "id": 25,
+    "rgb": 8550724,
+    "hex": "#827944",
+    "textureId": 348,
+    "walkable": true,
+    "hsl": {
+      "h": 36,
+      "s": 80,
+      "l": 99
+    },
+    "hueMultiplier": 8,
+    "weightedHue": 62,
+    "minimapColor": 9521
+  },
+  {
+    "id": 26,
+    "rgb": 0,
+    "hex": "#000000",
+    "textureId": 23,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 0
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 0
+  },
+  {
+    "id": 27,
+    "rgb": 0,
+    "hex": "#000000",
+    "textureId": 2,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 0
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 0
+  },
+  {
+    "id": 28,
+    "rgb": 3502602,
+    "hex": "#35720A",
+    "textureId": 276,
+    "walkable": true,
+    "hsl": {
+      "h": 67,
+      "s": 214,
+      "l": 62
+    },
+    "hueMultiplier": 27,
+    "weightedHue": 104,
+    "minimapColor": 17183
+  },
+  {
+    "id": 29,
+    "rgb": 15132395,
+    "hex": "#E6E6EB",
+    "textureId": 502,
+    "walkable": true,
+    "hsl": {
+      "h": 170,
+      "s": 27,
+      "l": 232
+    },
+    "hueMultiplier": 3,
+    "weightedHue": 5,
+    "minimapColor": 43124
+  },
+  {
+    "id": 30,
+    "rgb": 3932160,
+    "hex": "#3C0000",
+    "textureId": 493,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 255,
+      "l": 30
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 60,
+    "minimapColor": 911
+  },
+  {
+    "id": 31,
+    "rgb": 0,
+    "hex": "#000000",
+    "textureId": 11,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 0
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 0
+  },
+  {
+    "id": 32,
+    "rgb": 13170175,
+    "hex": "#C8F5FF",
+    "textureId": 494,
+    "walkable": true,
+    "hsl": {
+      "h": 135,
+      "s": 247,
+      "l": 227
+    },
+    "hueMultiplier": 29,
+    "weightedHue": 55,
+    "minimapColor": 33905
+  },
+  {
+    "id": 33,
+    "rgb": 3932160,
+    "hex": "#3C0000",
+    "textureId": 178,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 255,
+      "l": 30
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 60,
+    "minimapColor": 911
+  },
+  {
+    "id": 34,
+    "rgb": 5979170,
+    "hex": "#5B3C22",
+    "textureId": 595,
+    "walkable": true,
+    "hsl": {
+      "h": 19,
+      "s": 116,
+      "l": 62
+    },
+    "hueMultiplier": 4,
+    "weightedHue": 57,
+    "minimapColor": 4511
+  },
+  {
+    "id": 35,
+    "rgb": 6702097,
+    "hex": "#664411",
+    "textureId": 58,
+    "walkable": true,
+    "hsl": {
+      "h": 25,
+      "s": 182,
+      "l": 59
+    },
+    "hueMultiplier": 8,
+    "weightedHue": 85,
+    "minimapColor": 6813
+  },
+  {
+    "id": 36,
+    "rgb": 65793,
+    "hex": "#010101",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 1
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 0
+  },
+  {
+    "id": 37,
+    "rgb": 5601177,
+    "hex": "#557799",
+    "textureId": 493,
+    "walkable": true,
+    "hsl": {
+      "h": 149,
+      "s": 73,
+      "l": 119
+    },
+    "hueMultiplier": 39,
+    "weightedHue": 68,
+    "minimapColor": 38203
+  },
+  {
+    "id": 38,
+    "rgb": 0,
+    "hex": "#000000",
+    "textureId": 17,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 0
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 0
+  },
+  {
+    "id": 39,
+    "rgb": 4671907,
+    "hex": "#4749A3",
+    "textureId": 493,
+    "walkable": true,
+    "hsl": {
+      "h": 169,
+      "s": 100,
+      "l": 117
+    },
+    "hueMultiplier": 60,
+    "weightedHue": 92,
+    "minimapColor": 43450
+  },
+  {
+    "id": 40,
+    "rgb": 4153729,
+    "hex": "#3F6181",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": 148,
+      "s": 88,
+      "l": 96
+    },
+    "hueMultiplier": 38,
+    "weightedHue": 66,
+    "minimapColor": 38192
+  },
+  {
+    "id": 41,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 42,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 43,
+    "rgb": 5263440,
+    "hex": "#505050",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 80
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 40
+  },
+  {
+    "id": 44,
+    "rgb": 0,
+    "hex": "#000000",
+    "textureId": 3,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 0
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 0
+  },
+  {
+    "id": 45,
+    "rgb": 0,
+    "hex": "#000000",
+    "textureId": 23,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 0
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 0
+  },
+  {
+    "id": 46,
+    "rgb": 0,
+    "hex": "#000000",
+    "textureId": 2,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 0
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 0
+  },
+  {
+    "id": 47,
+    "rgb": 2631712,
+    "hex": "#282820",
+    "textureId": 424,
+    "walkable": true,
+    "hsl": {
+      "h": 42,
+      "s": 28,
+      "l": 36
+    },
+    "hueMultiplier": 1,
+    "weightedHue": 8,
+    "minimapColor": 10258
+  },
+  {
+    "id": 48,
+    "rgb": 2631712,
+    "hex": "#282820",
+    "textureId": 348,
+    "walkable": true,
+    "hsl": {
+      "h": 42,
+      "s": 28,
+      "l": 36
+    },
+    "hueMultiplier": 1,
+    "weightedHue": 8,
+    "minimapColor": 10258
+  },
+  {
+    "id": 49,
+    "rgb": 3153952,
+    "hex": "#302020",
+    "textureId": 593,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 51,
+      "l": 40
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 16,
+    "minimapColor": 148
+  },
+  {
+    "id": 50,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 51,
+    "rgb": 0,
+    "hex": "#000000",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 0
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 0
+  },
+  {
+    "id": 52,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 53,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 54,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 55,
+    "rgb": 6316120,
+    "hex": "#606058",
+    "textureId": 301,
+    "walkable": true,
+    "hsl": {
+      "h": 42,
+      "s": 11,
+      "l": 92
+    },
+    "hueMultiplier": 1,
+    "weightedHue": 8,
+    "minimapColor": 10286
+  },
+  {
+    "id": 56,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 57,
+    "rgb": 4008715,
+    "hex": "#3D2B0B",
+    "textureId": 600,
+    "walkable": true,
+    "hsl": {
+      "h": 27,
+      "s": 177,
+      "l": 36
+    },
+    "hueMultiplier": 5,
+    "weightedHue": 50,
+    "minimapColor": 6802
+  },
+  {
+    "id": 58,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 59,
+    "rgb": 8544278,
+    "hex": "#826016",
+    "textureId": 66,
+    "walkable": true,
+    "hsl": {
+      "h": 29,
+      "s": 181,
+      "l": 76
+    },
+    "hueMultiplier": 12,
+    "weightedHue": 108,
+    "minimapColor": 7846
+  },
+  {
+    "id": 60,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 61,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 62,
+    "rgb": 14392,
+    "hex": "#003838",
+    "textureId": 416,
+    "walkable": true,
+    "hsl": {
+      "h": 128,
+      "s": 255,
+      "l": 28
+    },
+    "hueMultiplier": 28,
+    "weightedHue": 56,
+    "minimapColor": 33678
+  },
+  {
+    "id": 63,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 64,
+    "rgb": 2107432,
+    "hex": "#202828",
+    "textureId": 598,
+    "walkable": true,
+    "hsl": {
+      "h": 128,
+      "s": 28,
+      "l": 36
+    },
+    "hueMultiplier": 4,
+    "weightedHue": 8,
+    "minimapColor": 32786
+  },
+  {
+    "id": 65,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 66,
+    "rgb": 4206608,
+    "hex": "#403010",
+    "textureId": 501,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 153,
+      "l": 40
+    },
+    "hueMultiplier": 5,
+    "weightedHue": 48,
+    "minimapColor": 7700
+  },
+  {
+    "id": 67,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 68,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 69,
+    "rgb": 10514504,
+    "hex": "#A07048",
+    "textureId": 66,
+    "walkable": true,
+    "hsl": {
+      "h": 19,
+      "s": 97,
+      "l": 116
+    },
+    "hueMultiplier": 6,
+    "weightedHue": 88,
+    "minimapColor": 4538
+  },
+  {
+    "id": 70,
+    "rgb": 10512711,
+    "hex": "#A06947",
+    "textureId": 301,
+    "walkable": true,
+    "hsl": {
+      "h": 16,
+      "s": 98,
+      "l": 115
+    },
+    "hueMultiplier": 5,
+    "weightedHue": 89,
+    "minimapColor": 4537
+  },
+  {
+    "id": 71,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 72,
+    "rgb": 5781528,
+    "hex": "#583818",
+    "textureId": 508,
+    "walkable": true,
+    "hsl": {
+      "h": 21,
+      "s": 146,
+      "l": 56
+    },
+    "hueMultiplier": 5,
+    "weightedHue": 64,
+    "minimapColor": 5660
+  },
+  {
+    "id": 73,
+    "rgb": 11063360,
+    "hex": "#A8D040",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": 54,
+      "s": 153,
+      "l": 136
+    },
+    "hueMultiplier": 30,
+    "weightedHue": 144,
+    "minimapColor": 13892
+  },
+  {
+    "id": 74,
+    "rgb": 4473924,
+    "hex": "#444444",
+    "textureId": 600,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 68
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 34
+  },
+  {
+    "id": 75,
+    "rgb": 12889166,
+    "hex": "#C4AC4E",
+    "textureId": 425,
+    "walkable": true,
+    "hsl": {
+      "h": 33,
+      "s": 126,
+      "l": 137
+    },
+    "hueMultiplier": 15,
+    "weightedHue": 118,
+    "minimapColor": 8644
+  },
+  {
+    "id": 76,
+    "rgb": 12031847,
+    "hex": "#B79767",
+    "textureId": 512,
+    "walkable": true,
+    "hsl": {
+      "h": 25,
+      "s": 90,
+      "l": 143
+    },
+    "hueMultiplier": 7,
+    "weightedHue": 80,
+    "minimapColor": 6471
+  },
+  {
+    "id": 77,
+    "rgb": 4008715,
+    "hex": "#3D2B0B",
+    "textureId": 300,
+    "walkable": true,
+    "hsl": {
+      "h": 27,
+      "s": 177,
+      "l": 36
+    },
+    "hueMultiplier": 5,
+    "weightedHue": 50,
+    "minimapColor": 6802
+  },
+  {
+    "id": 78,
+    "rgb": 9930575,
+    "hex": "#97874F",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": 33,
+      "s": 80,
+      "l": 115
+    },
+    "hueMultiplier": 9,
+    "weightedHue": 72,
+    "minimapColor": 8505
+  },
+  {
+    "id": 79,
+    "rgb": 8215339,
+    "hex": "#7D5B2B",
+    "textureId": 99,
+    "walkable": true,
+    "hsl": {
+      "h": 24,
+      "s": 124,
+      "l": 84
+    },
+    "hueMultiplier": 7,
+    "weightedHue": 82,
+    "minimapColor": 6570
+  },
+  {
+    "id": 80,
+    "rgb": 5259296,
+    "hex": "#504020",
+    "textureId": 129,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 109,
+      "l": 56
+    },
+    "hueMultiplier": 5,
+    "weightedHue": 48,
+    "minimapColor": 7580
+  },
+  {
+    "id": 81,
+    "rgb": 6050884,
+    "hex": "#5C5444",
+    "textureId": 508,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 38,
+      "l": 80
+    },
+    "hueMultiplier": 2,
+    "weightedHue": 24,
+    "minimapColor": 7336
+  },
+  {
+    "id": 82,
+    "rgb": 4603956,
+    "hex": "#464034",
+    "textureId": 508,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 37,
+      "l": 61
+    },
+    "hueMultiplier": 2,
+    "weightedHue": 18,
+    "minimapColor": 7326
+  },
+  {
+    "id": 83,
+    "rgb": 0,
+    "hex": "#000000",
+    "textureId": 35,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 0
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 0
+  },
+  {
+    "id": 84,
+    "rgb": 3159333,
+    "hex": "#303525",
+    "textureId": 668,
+    "walkable": true,
+    "hsl": {
+      "h": 56,
+      "s": 45,
+      "l": 45
+    },
+    "hueMultiplier": 3,
+    "weightedHue": 16,
+    "minimapColor": 14486
+  },
+  {
+    "id": 85,
+    "rgb": 3932160,
+    "hex": "#3C0000",
+    "textureId": 493,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 255,
+      "l": 30
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 60,
+    "minimapColor": 911
+  },
+  {
+    "id": 86,
+    "rgb": 4341619,
+    "hex": "#423F73",
+    "textureId": 408,
+    "walkable": true,
+    "hsl": {
+      "h": 173,
+      "s": 74,
+      "l": 89
+    },
+    "hueMultiplier": 35,
+    "weightedHue": 52,
+    "minimapColor": 44332
+  },
+  {
+    "id": 87,
+    "rgb": 5524791,
+    "hex": "#544D37",
+    "textureId": 181,
+    "walkable": true,
+    "hsl": {
+      "h": 32,
+      "s": 53,
+      "l": 69
+    },
+    "hueMultiplier": 3,
+    "weightedHue": 29,
+    "minimapColor": 8354
+  },
+  {
+    "id": 88,
+    "rgb": 6178332,
+    "hex": "#5E461C",
+    "textureId": 197,
+    "walkable": true,
+    "hsl": {
+      "h": 27,
+      "s": 138,
+      "l": 61
+    },
+    "hueMultiplier": 7,
+    "weightedHue": 66,
+    "minimapColor": 6686
+  },
+  {
+    "id": 89,
+    "rgb": 3025184,
+    "hex": "#2E2920",
+    "textureId": 416,
+    "walkable": true,
+    "hsl": {
+      "h": 27,
+      "s": 45,
+      "l": 39
+    },
+    "hueMultiplier": 1,
+    "weightedHue": 14,
+    "minimapColor": 6291
+  },
+  {
+    "id": 90,
+    "rgb": 5259296,
+    "hex": "#504020",
+    "textureId": 505,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 109,
+      "l": 56
+    },
+    "hueMultiplier": 5,
+    "weightedHue": 48,
+    "minimapColor": 7580
+  },
+  {
+    "id": 91,
+    "rgb": 14540253,
+    "hex": "#DDDDDD",
+    "textureId": 301,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 221
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 110
+  },
+  {
+    "id": 92,
+    "rgb": 6697728,
+    "hex": "#663300",
+    "textureId": 328,
+    "walkable": true,
+    "hsl": {
+      "h": 21,
+      "s": 255,
+      "l": 51
+    },
+    "hueMultiplier": 8,
+    "weightedHue": 102,
+    "minimapColor": 6041
+  },
+  {
+    "id": 93,
+    "rgb": 5259296,
+    "hex": "#504020",
+    "textureId": 492,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 109,
+      "l": 56
+    },
+    "hueMultiplier": 5,
+    "weightedHue": 48,
+    "minimapColor": 7580
+  },
+  {
+    "id": 94,
+    "rgb": 6639128,
+    "hex": "#654E18",
+    "textureId": 595,
+    "walkable": true,
+    "hsl": {
+      "h": 29,
+      "s": 157,
+      "l": 62
+    },
+    "hueMultiplier": 9,
+    "weightedHue": 77,
+    "minimapColor": 7711
+  },
+  {
+    "id": 95,
+    "rgb": 9203260,
+    "hex": "#8C6E3C",
+    "textureId": 355,
+    "walkable": true,
+    "hsl": {
+      "h": 26,
+      "s": 102,
+      "l": 100
+    },
+    "hueMultiplier": 8,
+    "weightedHue": 80,
+    "minimapColor": 6578
+  },
+  {
+    "id": 96,
+    "rgb": 6178332,
+    "hex": "#5E461C",
+    "textureId": 506,
+    "walkable": true,
+    "hsl": {
+      "h": 27,
+      "s": 138,
+      "l": 61
+    },
+    "hueMultiplier": 7,
+    "weightedHue": 66,
+    "minimapColor": 6686
+  },
+  {
+    "id": 97,
+    "rgb": 7166763,
+    "hex": "#6D5B2B",
+    "textureId": 492,
+    "walkable": true,
+    "hsl": {
+      "h": 31,
+      "s": 111,
+      "l": 76
+    },
+    "hueMultiplier": 8,
+    "weightedHue": 66,
+    "minimapColor": 7590
+  },
+  {
+    "id": 98,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 99,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 100,
+    "rgb": 5521943,
+    "hex": "#544217",
+    "textureId": 512,
+    "walkable": true,
+    "hsl": {
+      "h": 30,
+      "s": 145,
+      "l": 53
+    },
+    "hueMultiplier": 7,
+    "weightedHue": 60,
+    "minimapColor": 7706
+  },
+  {
+    "id": 101,
+    "rgb": 3159333,
+    "hex": "#303525",
+    "textureId": 596,
+    "walkable": true,
+    "hsl": {
+      "h": 56,
+      "s": 45,
+      "l": 45
+    },
+    "hueMultiplier": 3,
+    "weightedHue": 16,
+    "minimapColor": 14486
+  },
+  {
+    "id": 102,
+    "rgb": 7893088,
+    "hex": "#787060",
+    "textureId": 505,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 28,
+      "l": 108
+    },
+    "hueMultiplier": 2,
+    "weightedHue": 24,
+    "minimapColor": 7222
+  },
+  {
+    "id": 103,
+    "rgb": 8635338,
+    "hex": "#83C3CA",
+    "textureId": 174,
+    "walkable": true,
+    "hsl": {
+      "h": 132,
+      "s": 101,
+      "l": 166
+    },
+    "hueMultiplier": 36,
+    "weightedHue": 71,
+    "minimapColor": 34259
+  },
+  {
+    "id": 104,
+    "rgb": 6710886,
+    "hex": "#666666",
+    "textureId": 593,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 102
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 51
+  },
+  {
+    "id": 105,
+    "rgb": 6707515,
+    "hex": "#66593B",
+    "textureId": 301,
+    "walkable": true,
+    "hsl": {
+      "h": 29,
+      "s": 68,
+      "l": 80
+    },
+    "hueMultiplier": 5,
+    "weightedHue": 43,
+    "minimapColor": 7464
+  },
+  {
+    "id": 106,
+    "rgb": 3820341,
+    "hex": "#3A4B35",
+    "textureId": 328,
+    "walkable": true,
+    "hsl": {
+      "h": 75,
+      "s": 44,
+      "l": 64
+    },
+    "hueMultiplier": 6,
+    "weightedHue": 22,
+    "minimapColor": 18592
+  },
+  {
+    "id": 107,
+    "rgb": 4206608,
+    "hex": "#403010",
+    "textureId": 400,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 153,
+      "l": 40
+    },
+    "hueMultiplier": 5,
+    "weightedHue": 48,
+    "minimapColor": 7700
+  },
+  {
+    "id": 108,
+    "rgb": 4008715,
+    "hex": "#3D2B0B",
+    "textureId": 602,
+    "walkable": true,
+    "hsl": {
+      "h": 27,
+      "s": 177,
+      "l": 36
+    },
+    "hueMultiplier": 5,
+    "weightedHue": 50,
+    "minimapColor": 6802
+  },
+  {
+    "id": 109,
+    "rgb": 3684384,
+    "hex": "#383820",
+    "textureId": 516,
+    "walkable": true,
+    "hsl": {
+      "h": 42,
+      "s": 69,
+      "l": 44
+    },
+    "hueMultiplier": 4,
+    "weightedHue": 24,
+    "minimapColor": 10518
+  },
+  {
+    "id": 110,
+    "rgb": 16490810,
+    "hex": "#FBA13A",
+    "textureId": 61,
+    "walkable": true,
+    "hsl": {
+      "h": 22,
+      "s": 243,
+      "l": 154
+    },
+    "hueMultiplier": 17,
+    "weightedHue": 193,
+    "minimapColor": 6093
+  },
+  {
+    "id": 111,
+    "rgb": 16777215,
+    "hex": "#FFFFFF",
+    "textureId": 669,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 255
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 127
+  },
+  {
+    "id": 112,
+    "rgb": 12098407,
+    "hex": "#B89B67",
+    "textureId": 301,
+    "walkable": true,
+    "hsl": {
+      "h": 27,
+      "s": 92,
+      "l": 143
+    },
+    "hueMultiplier": 8,
+    "weightedHue": 81,
+    "minimapColor": 6471
+  },
+  {
+    "id": 113,
+    "rgb": 16777215,
+    "hex": "#FFFFFF",
+    "textureId": 651,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 255
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 127
+  },
+  {
+    "id": 114,
+    "rgb": 6708568,
+    "hex": "#665D58",
+    "textureId": 505,
+    "walkable": true,
+    "hsl": {
+      "h": 15,
+      "s": 18,
+      "l": 95
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 13,
+    "minimapColor": 3119
+  },
+  {
+    "id": 115,
+    "rgb": 3159333,
+    "hex": "#303525",
+    "textureId": 596,
+    "walkable": true,
+    "hsl": {
+      "h": 56,
+      "s": 45,
+      "l": 45
+    },
+    "hueMultiplier": 3,
+    "weightedHue": 16,
+    "minimapColor": 14486
+  },
+  {
+    "id": 116,
+    "rgb": 5197647,
+    "hex": "#4F4F4F",
+    "textureId": 597,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 79
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 39
+  },
+  {
+    "id": 117,
+    "rgb": 5259296,
+    "hex": "#504020",
+    "textureId": 492,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 109,
+      "l": 56
+    },
+    "hueMultiplier": 5,
+    "weightedHue": 48,
+    "minimapColor": 7580
+  },
+  {
+    "id": 118,
+    "rgb": 6050876,
+    "hex": "#5C543C",
+    "textureId": 424,
+    "walkable": true,
+    "hsl": {
+      "h": 32,
+      "s": 53,
+      "l": 76
+    },
+    "hueMultiplier": 4,
+    "weightedHue": 32,
+    "minimapColor": 8358
+  },
+  {
+    "id": 119,
+    "rgb": 3091231,
+    "hex": "#2F2B1F",
+    "textureId": 424,
+    "walkable": true,
+    "hsl": {
+      "h": 32,
+      "s": 52,
+      "l": 39
+    },
+    "hueMultiplier": 2,
+    "weightedHue": 16,
+    "minimapColor": 8339
+  },
+  {
+    "id": 120,
+    "rgb": 6708811,
+    "hex": "#665E4B",
+    "textureId": 500,
+    "walkable": true,
+    "hsl": {
+      "h": 30,
+      "s": 39,
+      "l": 88
+    },
+    "hueMultiplier": 3,
+    "weightedHue": 27,
+    "minimapColor": 7340
+  },
+  {
+    "id": 121,
+    "rgb": 5260845,
+    "hex": "#50462D",
+    "textureId": 619,
+    "walkable": true,
+    "hsl": {
+      "h": 30,
+      "s": 71,
+      "l": 62
+    },
+    "hueMultiplier": 4,
+    "weightedHue": 35,
+    "minimapColor": 7455
+  },
+  {
+    "id": 122,
+    "rgb": 12103832,
+    "hex": "#B8B098",
+    "textureId": 507,
+    "walkable": true,
+    "hsl": {
+      "h": 32,
+      "s": 46,
+      "l": 168
+    },
+    "hueMultiplier": 4,
+    "weightedHue": 32,
+    "minimapColor": 8404
+  },
+  {
+    "id": 123,
+    "rgb": 3159333,
+    "hex": "#303525",
+    "textureId": 623,
+    "walkable": true,
+    "hsl": {
+      "h": 56,
+      "s": 45,
+      "l": 45
+    },
+    "hueMultiplier": 3,
+    "weightedHue": 16,
+    "minimapColor": 14486
+  },
+  {
+    "id": 124,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 125,
+    "rgb": 12291432,
+    "hex": "#BB8D68",
+    "textureId": 512,
+    "walkable": true,
+    "hsl": {
+      "h": 19,
+      "s": 96,
+      "l": 145
+    },
+    "hueMultiplier": 6,
+    "weightedHue": 83,
+    "minimapColor": 4552
+  },
+  {
+    "id": 126,
+    "rgb": 4210744,
+    "hex": "#404038",
+    "textureId": 424,
+    "walkable": true,
+    "hsl": {
+      "h": 42,
+      "s": 17,
+      "l": 60
+    },
+    "hueMultiplier": 1,
+    "weightedHue": 8,
+    "minimapColor": 10270
+  },
+  {
+    "id": 127,
+    "rgb": 7841669,
+    "hex": "#77A785",
+    "textureId": 58,
+    "walkable": true,
+    "hsl": {
+      "h": 97,
+      "s": 54,
+      "l": 143
+    },
+    "hueMultiplier": 18,
+    "weightedHue": 48,
+    "minimapColor": 24775
+  },
+  {
+    "id": 128,
+    "rgb": 16777215,
+    "hex": "#FFFFFF",
+    "textureId": 671,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 255
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 127
+  },
+  {
+    "id": 129,
+    "rgb": 8570040,
+    "hex": "#82C4B8",
+    "textureId": 58,
+    "walkable": true,
+    "hsl": {
+      "h": 120,
+      "s": 90,
+      "l": 163
+    },
+    "hueMultiplier": 31,
+    "weightedHue": 66,
+    "minimapColor": 31057
+  },
+  {
+    "id": 130,
+    "rgb": 2565904,
+    "hex": "#272710",
+    "textureId": 181,
+    "walkable": true,
+    "hsl": {
+      "h": 42,
+      "s": 107,
+      "l": 27
+    },
+    "hueMultiplier": 3,
+    "weightedHue": 23,
+    "minimapColor": 10637
+  },
+  {
+    "id": 131,
+    "rgb": 3617321,
+    "hex": "#373229",
+    "textureId": 500,
+    "walkable": true,
+    "hsl": {
+      "h": 27,
+      "s": 37,
+      "l": 48
+    },
+    "hueMultiplier": 1,
+    "weightedHue": 14,
+    "minimapColor": 6296
+  },
+  {
+    "id": 132,
+    "rgb": 3160104,
+    "hex": "#303828",
+    "textureId": 593,
+    "walkable": true,
+    "hsl": {
+      "h": 64,
+      "s": 42,
+      "l": 48
+    },
+    "hueMultiplier": 4,
+    "weightedHue": 16,
+    "minimapColor": 16536
+  },
+  {
+    "id": 133,
+    "rgb": 4210756,
+    "hex": "#404044",
+    "textureId": 301,
+    "walkable": true,
+    "hsl": {
+      "h": 170,
+      "s": 7,
+      "l": 66
+    },
+    "hueMultiplier": 2,
+    "weightedHue": 4,
+    "minimapColor": 43041
+  },
+  {
+    "id": 134,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 135,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 136,
+    "rgb": 7629129,
+    "hex": "#746949",
+    "textureId": 608,
+    "walkable": true,
+    "hsl": {
+      "h": 31,
+      "s": 58,
+      "l": 94
+    },
+    "hueMultiplier": 5,
+    "weightedHue": 43,
+    "minimapColor": 7343
+  },
+  {
+    "id": 137,
+    "rgb": 16777215,
+    "hex": "#FFFFFF",
+    "textureId": 670,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 255
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 127
+  },
+  {
+    "id": 138,
+    "rgb": 3617826,
+    "hex": "#373422",
+    "textureId": 621,
+    "walkable": true,
+    "hsl": {
+      "h": 36,
+      "s": 60,
+      "l": 44
+    },
+    "hueMultiplier": 3,
+    "weightedHue": 21,
+    "minimapColor": 9366
+  },
+  {
+    "id": 139,
+    "rgb": 7166763,
+    "hex": "#6D5B2B",
+    "textureId": 181,
+    "walkable": true,
+    "hsl": {
+      "h": 31,
+      "s": 111,
+      "l": 76
+    },
+    "hueMultiplier": 8,
+    "weightedHue": 66,
+    "minimapColor": 7590
+  },
+  {
+    "id": 140,
+    "rgb": 15132395,
+    "hex": "#E6E6EB",
+    "textureId": 274,
+    "walkable": true,
+    "hsl": {
+      "h": 170,
+      "s": 27,
+      "l": 232
+    },
+    "hueMultiplier": 3,
+    "weightedHue": 5,
+    "minimapColor": 43124
+  },
+  {
+    "id": 141,
+    "rgb": 13170175,
+    "hex": "#C8F5FF",
+    "textureId": 494,
+    "walkable": true,
+    "hsl": {
+      "h": 135,
+      "s": 247,
+      "l": 227
+    },
+    "hueMultiplier": 29,
+    "weightedHue": 55,
+    "minimapColor": 33905
+  },
+  {
+    "id": 142,
+    "rgb": 65793,
+    "hex": "#010101",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 1
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 0
+  },
+  {
+    "id": 143,
+    "rgb": 12031847,
+    "hex": "#B79767",
+    "textureId": 512,
+    "walkable": true,
+    "hsl": {
+      "h": 25,
+      "s": 90,
+      "l": 143
+    },
+    "hueMultiplier": 7,
+    "weightedHue": 80,
+    "minimapColor": 6471
+  },
+  {
+    "id": 144,
+    "rgb": 6178332,
+    "hex": "#5E461C",
+    "textureId": 197,
+    "walkable": true,
+    "hsl": {
+      "h": 27,
+      "s": 138,
+      "l": 61
+    },
+    "hueMultiplier": 7,
+    "weightedHue": 66,
+    "minimapColor": 6686
+  },
+  {
+    "id": 145,
+    "rgb": 3820341,
+    "hex": "#3A4B35",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": 75,
+      "s": 44,
+      "l": 64
+    },
+    "hueMultiplier": 6,
+    "weightedHue": 22,
+    "minimapColor": 18592
+  },
+  {
+    "id": 146,
+    "rgb": 8570040,
+    "hex": "#82C4B8",
+    "textureId": 274,
+    "walkable": true,
+    "hsl": {
+      "h": 120,
+      "s": 90,
+      "l": 163
+    },
+    "hueMultiplier": 31,
+    "weightedHue": 66,
+    "minimapColor": 31057
+  },
+  {
+    "id": 147,
+    "rgb": 5657162,
+    "hex": "#56524A",
+    "textureId": 422,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 19,
+      "l": 80
+    },
+    "hueMultiplier": 1,
+    "weightedHue": 12,
+    "minimapColor": 7208
+  },
+  {
+    "id": 148,
+    "rgb": 14526173,
+    "hex": "#DDA6DD",
+    "textureId": 274,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 112,
+      "l": 193
+    },
+    "hueMultiplier": -9,
+    "weightedHue": 55,
+    "minimapColor": -11168
+  },
+  {
+    "id": 149,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 150,
+    "rgb": 7509687,
+    "hex": "#7296B7",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": 148,
+      "s": 82,
+      "l": 148
+    },
+    "hueMultiplier": 40,
+    "weightedHue": 69,
+    "minimapColor": 38218
+  },
+  {
+    "id": 151,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 152,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 153,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 154,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 155,
+    "rgb": 4491374,
+    "hex": "#44886E",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": 111,
+      "s": 85,
+      "l": 102
+    },
+    "hueMultiplier": 29,
+    "weightedHue": 68,
+    "minimapColor": 27955
+  },
+  {
+    "id": 156,
+    "rgb": 16430903,
+    "hex": "#FAB737",
+    "textureId": 61,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 241,
+      "l": 152
+    },
+    "hueMultiplier": 21,
+    "weightedHue": 195,
+    "minimapColor": 8140
+  },
+  {
+    "id": 157,
+    "rgb": 4293295,
+    "hex": "#4182AF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": 145,
+      "s": 117,
+      "l": 120
+    },
+    "hueMultiplier": 62,
+    "weightedHue": 110,
+    "minimapColor": 37308
+  },
+  {
+    "id": 158,
+    "rgb": 3942435,
+    "hex": "#3C2823",
+    "textureId": 625,
+    "walkable": true,
+    "hsl": {
+      "h": 8,
+      "s": 67,
+      "l": 47
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 25,
+    "minimapColor": 2327
+  },
+  {
+    "id": 159,
+    "rgb": 14526173,
+    "hex": "#DDA6DD",
+    "textureId": 274,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 112,
+      "l": 193
+    },
+    "hueMultiplier": -9,
+    "weightedHue": 55,
+    "minimapColor": -11168
+  },
+  {
+    "id": 160,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 161,
+    "rgb": 4412737,
+    "hex": "#435541",
+    "textureId": 493,
+    "walkable": true,
+    "hsl": {
+      "h": 81,
+      "s": 34,
+      "l": 75
+    },
+    "hueMultiplier": 6,
+    "weightedHue": 20,
+    "minimapColor": 20645
+  },
+  {
+    "id": 162,
+    "rgb": 7224879,
+    "hex": "#6E3E2F",
+    "textureId": 493,
+    "walkable": true,
+    "hsl": {
+      "h": 10,
+      "s": 102,
+      "l": 78
+    },
+    "hueMultiplier": 2,
+    "weightedHue": 63,
+    "minimapColor": 2471
+  },
+  {
+    "id": 163,
+    "rgb": 4206608,
+    "hex": "#403010",
+    "textureId": 400,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 153,
+      "l": 40
+    },
+    "hueMultiplier": 5,
+    "weightedHue": 48,
+    "minimapColor": 7700
+  },
+  {
+    "id": 164,
+    "rgb": 4473924,
+    "hex": "#444444",
+    "textureId": 512,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 68
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 34
+  },
+  {
+    "id": 165,
+    "rgb": 10053120,
+    "hex": "#996600",
+    "textureId": 20,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 255,
+      "l": 76
+    },
+    "hueMultiplier": 17,
+    "weightedHue": 153,
+    "minimapColor": 8102
+  },
+  {
+    "id": 166,
+    "rgb": 10053120,
+    "hex": "#996600",
+    "textureId": 20,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 255,
+      "l": 76
+    },
+    "hueMultiplier": 17,
+    "weightedHue": 153,
+    "minimapColor": 8102
+  },
+  {
+    "id": 167,
+    "rgb": 4341619,
+    "hex": "#423F73",
+    "textureId": 408,
+    "walkable": true,
+    "hsl": {
+      "h": 173,
+      "s": 74,
+      "l": 89
+    },
+    "hueMultiplier": 35,
+    "weightedHue": 52,
+    "minimapColor": 44332
+  },
+  {
+    "id": 168,
+    "rgb": 16777215,
+    "hex": "#FFFFFF",
+    "textureId": 637,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 255
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 127
+  },
+  {
+    "id": 169,
+    "rgb": 5521943,
+    "hex": "#544217",
+    "textureId": 422,
+    "walkable": true,
+    "hsl": {
+      "h": 30,
+      "s": 145,
+      "l": 53
+    },
+    "hueMultiplier": 7,
+    "weightedHue": 60,
+    "minimapColor": 7706
+  },
+  {
+    "id": 170,
+    "rgb": 7893088,
+    "hex": "#787060",
+    "textureId": 505,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 28,
+      "l": 108
+    },
+    "hueMultiplier": 2,
+    "weightedHue": 24,
+    "minimapColor": 7222
+  },
+  {
+    "id": 171,
+    "rgb": 7891794,
+    "hex": "#786B52",
+    "textureId": 66,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 48,
+      "l": 101
+    },
+    "hueMultiplier": 4,
+    "weightedHue": 38,
+    "minimapColor": 7346
+  },
+  {
+    "id": 172,
+    "rgb": 7891016,
+    "hex": "#786848",
+    "textureId": 66,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 64,
+      "l": 96
+    },
+    "hueMultiplier": 5,
+    "weightedHue": 48,
+    "minimapColor": 7472
+  },
+  {
+    "id": 173,
+    "rgb": 6316120,
+    "hex": "#606058",
+    "textureId": 43,
+    "walkable": true,
+    "hsl": {
+      "h": 42,
+      "s": 11,
+      "l": 92
+    },
+    "hueMultiplier": 1,
+    "weightedHue": 8,
+    "minimapColor": 10286
+  },
+  {
+    "id": 174,
+    "rgb": 5260845,
+    "hex": "#50462D",
+    "textureId": 619,
+    "walkable": true,
+    "hsl": {
+      "h": 30,
+      "s": 71,
+      "l": 62
+    },
+    "hueMultiplier": 4,
+    "weightedHue": 35,
+    "minimapColor": 7455
+  },
+  {
+    "id": 175,
+    "rgb": 8414502,
+    "hex": "#806526",
+    "textureId": 617,
+    "walkable": true,
+    "hsl": {
+      "h": 29,
+      "s": 138,
+      "l": 83
+    },
+    "hueMultiplier": 10,
+    "weightedHue": 90,
+    "minimapColor": 7721
+  },
+  {
+    "id": 176,
+    "rgb": 3617321,
+    "hex": "#373229",
+    "textureId": 500,
+    "walkable": true,
+    "hsl": {
+      "h": 27,
+      "s": 37,
+      "l": 48
+    },
+    "hueMultiplier": 1,
+    "weightedHue": 14,
+    "minimapColor": 6296
+  },
+  {
+    "id": 177,
+    "rgb": 5723469,
+    "hex": "#57554D",
+    "textureId": 600,
+    "walkable": true,
+    "hsl": {
+      "h": 34,
+      "s": 15,
+      "l": 82
+    },
+    "hueMultiplier": 1,
+    "weightedHue": 10,
+    "minimapColor": 8233
+  },
+  {
+    "id": 178,
+    "rgb": 7957076,
+    "hex": "#796A54",
+    "textureId": 608,
+    "walkable": true,
+    "hsl": {
+      "h": 25,
+      "s": 46,
+      "l": 102
+    },
+    "hueMultiplier": 3,
+    "weightedHue": 37,
+    "minimapColor": 6323
+  },
+  {
+    "id": 179,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  },
+  {
+    "id": 180,
+    "rgb": 8683381,
+    "hex": "#847F75",
+    "textureId": 600,
+    "walkable": true,
+    "hsl": {
+      "h": 28,
+      "s": 15,
+      "l": 124
+    },
+    "hueMultiplier": 1,
+    "weightedHue": 15,
+    "minimapColor": 7230
+  },
+  {
+    "id": 181,
+    "rgb": 10040115,
+    "hex": "#993333",
+    "textureId": 58,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 128,
+      "l": 102
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 102,
+    "minimapColor": 563
+  },
+  {
+    "id": 182,
+    "rgb": 65793,
+    "hex": "#010101",
+    "textureId": 505,
+    "walkable": true,
+    "hsl": {
+      "h": 0,
+      "s": 0,
+      "l": 1
+    },
+    "hueMultiplier": 0,
+    "weightedHue": 1,
+    "minimapColor": 0
+  },
+  {
+    "id": 183,
+    "rgb": 4153729,
+    "hex": "#3F6181",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": 148,
+      "s": 88,
+      "l": 96
+    },
+    "hueMultiplier": 38,
+    "weightedHue": 66,
+    "minimapColor": 38192
+  },
+  {
+    "id": 184,
+    "rgb": 16711935,
+    "hex": "#FF00FF",
+    "textureId": -1,
+    "walkable": true,
+    "hsl": {
+      "h": -42,
+      "s": 255,
+      "l": 127
+    },
+    "hueMultiplier": -42,
+    "weightedHue": 255,
+    "minimapColor": -10305
+  }
+]
