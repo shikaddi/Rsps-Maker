@@ -1,9 +1,48 @@
 from .archive import build_archive_map, get_file_data, datReader, read_idx_file, try_decompression
 import traceback
 import os
+import copy
+import pickle
 from dataclasses import dataclass, field
 
 
+CACHE_FILENAME = "object_cache.pkl"
+CACHE_PATH = os.path.join(os.path.dirname(__file__), "static", "objects", CACHE_FILENAME)
+try:
+    with open(CACHE_PATH, "rb") as _fh:
+        _OBJECT_CACHE: dict[str, dict] = pickle.load(_fh)
+except Exception:
+    _OBJECT_CACHE = {}
+
+# Feature flag: toggle backend recolouring of face colours.
+ENABLE_RECOLOURING = True
+
+# Debug configuration: restrict logging to a specific object/model id.
+# Set to None / empty set to disable filtering, or adjust values as needed.
+DEBUG_OBJECT_ID: int | None = None
+DEBUG_MODEL_IDS: set[int] = {0}
+
+_CURRENT_DEBUG_OBJECT_ID: int | None = None
+_CURRENT_DEBUG_MODEL_ID: int | None = None
+
+def _debug_log_enabled(obj_id: int | None = None, model_id: int | None = None) -> bool:
+    """Return True when diagnostic output should be emitted."""
+    obj_candidate = obj_id if obj_id is not None else _CURRENT_DEBUG_OBJECT_ID
+    model_candidate = model_id if model_id is not None else _CURRENT_DEBUG_MODEL_ID
+
+    if DEBUG_OBJECT_ID is not None and obj_candidate != DEBUG_OBJECT_ID:
+        return False
+    if DEBUG_MODEL_IDS:
+        if model_candidate is None:
+            return DEBUG_OBJECT_ID is not None and obj_candidate == DEBUG_OBJECT_ID
+        if model_candidate not in DEBUG_MODEL_IDS:
+            return False
+    return True
+
+def debug_print(*args, obj_id: int | None = None, model_id: int | None = None, **kwargs):
+    """Wrapper around print that honours the debug object/model filters."""
+    if _debug_log_enabled(obj_id=obj_id, model_id=model_id):
+        print(*args, **kwargs)
 # ---------- ObjectDefinition parser (317–400-ish) ----------
 ALLOWED_MODEL_TYPES = set(range(0, 23))   # 0..22
 
@@ -90,6 +129,44 @@ class ObjectDef:
     scaleX: int = 128
     scaleY: int = 128
     scaleZ: int = 128
+
+
+def remap_face_colours(
+    face_cols: list[int],
+    face_tex: list[bool] | None,
+    original: list[int],
+    modified: list[int],
+) -> list[int]:
+    """
+    Apply RuneScape-style colour swaps to per-face colours, mirroring
+    Model.method476() behaviour from the legacy client. RuneScape's naming is
+    historical: `modifiedModelColors` holds the *source* colours that appear in
+    the mesh, while `originalModelColors` stores the *replacement* colours.
+    - face_cols: packed HSL colours per face (len == face count)
+    - face_tex: optional textured-face flags; textured faces keep their colour
+    - original/modified: parallel lists providing replacement/source pairs
+    Returns the recoloured list (or the original list if no changes are needed).
+    """
+    if not original or not modified:
+        return face_cols
+    if len(original) != len(modified):
+        return face_cols
+
+    lookup = {src & 0xFFFF: repl & 0xFFFF for repl, src in zip(original, modified)}
+    if not lookup:
+        return face_cols
+
+    out = None
+    for idx, col in enumerate(face_cols):
+        if col is None or col == 65535:
+            continue
+        replacement = lookup.get(col & 0xFFFF)
+        if replacement is None or replacement == col:
+            continue
+        if out is None:
+            out = list(face_cols)
+        out[idx] = replacement
+    return out if out is not None else face_cols
     animation: int = -1
     varbit: int = -1
     varp: int = -1
@@ -255,8 +332,10 @@ def parse_object_def(raw: bytes, obj_id: int) -> ObjectDef:
                 if not have(4):
                     off = n
                     break
-                obj.originalModelColors.append(u16())
-                obj.modifiedModelColors.append(u16())
+                src = u16()
+                dst = u16()
+                obj.modifiedModelColors.append(src)
+                obj.originalModelColors.append(dst)
 
         elif opcode == 41:                                       # retextures (667+)
             cnt = u8()
@@ -432,7 +511,7 @@ def read_model_blob(model_id: int, model_index, dat_path="main_file_cache.dat") 
     # Build a single-entry table for the reader
     reader = datReader(dat_path, [(fid, length, first_sector)], expected_cache_id=2)
     blob = reader.read_file(fid)
-    print("compressed length: ", len(blob))
+    debug_print("compressed length: ", len(blob), model_id=model_id)
     if len(blob) != length:
         raise ValueError(f"model {model_id}: length mismatch {len(blob)} != {length}")
     return try_decompression(blob)
@@ -663,7 +742,7 @@ def parse_model_header_525_622_at(buf: bytes, trailer_at: int, force_622: bool|N
         offs["tri_cmds"] = offs["face_idx16"]
 
     layout = "622" if is_622 else "525"
-    print(f"PY header {layout} trailer_at={trailer_at} v={v} f={f} t={t}")
+    debug_print(f"PY header {layout} trailer_at={trailer_at} v={v} f={f} t={t}")
     return ModelHeader(v, f, t, layout, newfmt, offs, trailer_at, calc_end=k5)
 
 
@@ -733,7 +812,7 @@ def parse_model_header_317_at(buf: bytes, trailer_at: int) -> ModelHeader:
     if l2 > n:
         raise ValueError(f"trailer points past end (endian=little): need {l2}, have {n}")
 
-    print(f"PY header 317 trailer_at={trailer_at} v={v} f={f} t={t}")
+    debug_print(f"PY header 317 trailer_at={trailer_at} v={v} f={f} t={t}")
     return ModelHeader(v, f, t, "317", None, offs, trailer_at,calc_end=l2)
 
 # ---------- main with diagnostics ----------
@@ -928,7 +1007,7 @@ def decode_geom_525_622(buf: bytes, meta) -> tuple[list[tuple[int,int,int]], lis
         _dprint(f"  build_faces using {cmd_key_use}")
         off_modes, len_modes = meta.offs["tri_types"]
         off_cmd, len_cmd = meta.offs[cmd_key_use]
-        print("off_modes: ", off_modes, " len_modes: ", len_modes, " off_cmd: ", off_cmd, " len_cmd: ", len_cmd)
+        debug_print("off_modes: ", off_modes, " len_modes: ", len_modes, " off_cmd: ", off_cmd, " len_cmd: ", len_cmd)
         modes = BR2(buf, off_modes, len_modes)
         cmd   = BR2(buf, off_cmd, len_cmd)
         try:
@@ -1086,7 +1165,7 @@ def compute_type0_face_uvs_525_622(buf: bytes, meta, verts, faces) -> list[tuple
         t0 = cnt.get(0, 0)
         expected_t0 = 6*t0
         off_t0, len_t0 = meta.offs.get("tex_type0", (None, 0))
-        print(f"O types: {dict(cnt)}; type0={t0}, tex_type0_len={len_t0}, expected={expected_t0}")
+        debug_print(f"O types: {dict(cnt)}; type0={t0}, tex_type0_len={len_t0}, expected={expected_t0}")
     except Exception:
         pass
     # Build rank mapping for type-0 textured triangles
@@ -1591,88 +1670,11 @@ def write_gltf_positions_indices(verts, faces, out_path: str, *, face_colors: li
     if node_scale is not None:
         gltf["nodes"][0]["scale"] = [float(node_scale[0]), float(node_scale[1]), float(node_scale[2])]
     if hide_untextured:
-        print(f"hidden faces (no UVs): {hidden_count}/{len(faces)}")
+        debug_print(f"hidden faces (no UVs): {hidden_count}/{len(faces)}")
 
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(gltf, f, indent=2)
     return out_path
-
-def main():
-
-
-    # add before the for-loop
-    stats = dict(objects=0, with_models=0, models_total=0, models_ok=0, models_err=0,
-                 models_missing=0, models_out_of_range=0, trailer_mismatch=0)
-    for obj_id in obj_ids[:50]:  # cap for diagnostics
-        print("obj:", obj_id)
-        try:
-            objectdef = od_cache.get(obj_id)
-        except KeyError:
-            continue
-        if not objectdef.model_ids_by_t:
-            continue
-        # inside the for obj_id loop, right after you get objectdef:
-        stats['objects'] += 1
-        if not objectdef.model_ids_by_t:
-            continue
-        stats['with_models'] += 1
-        
-        '''for t, mids in objectdef.model_ids_by_t.items():
-            for model_id in mids:  # check all, not just first
-                if not is_valid_model_id(model_id, model_index):
-                    stats['models_out_of_range'] += 1
-                    print(f"  model {model_id} out of range (idx1 has {len(model_index)})")
-                    continue
-                stats['models_total'] += 1
-                try:
-                    blob = read_model_blob(model_id, model_index)
-                    meta = parse_model_header_any(blob)
-    
-                    if meta.calc_end != meta.used_trailer_at:
-                        stats['trailer_mismatch'] += 1
-                        gap = meta.used_trailer_at - meta.calc_end
-                        if gap > 0:
-                            pad = blob[meta.calc_end:meta.used_trailer_at]
-                            all_zero = all(b == 0 for b in pad)
-                            print(f"  warn: trailer mismatch model {model_id} calc_end={meta.calc_end} "
-                                  f"trailer_at={meta.used_trailer_at} gap={gap} zeros={all_zero}")
-                        else:
-                            print(f"  warn: trailer mismatch model {model_id} calc_end={meta.calc_end} "
-                                  f"trailer_at={meta.used_trailer_at} (overlap {-gap} bytes)")
-                except FileNotFoundError:
-                    stats['models_missing'] += 1
-                    print(f"  model {model_id} missing in this cache")
-                except Exception as e:
-                    stats['models_err'] += 1
-                    print(f"  model {model_id} error: {e}")'''
-        for t, mids in objectdef.model_ids_by_t.items():
-            if not mids:
-                continue
-            model_id = mids[0]
-            if not is_valid_model_id(model_id, model_index):
-                print(f"  model {model_id} out of range (idx1 has {len(model_index)} entries)")
-                continue
-            try:
-                blob = read_model_blob(model_id, model_index)
-                # print("  model len:", len(blob))
-                # print("  head32:", blob[:32].hex())
-                # print("  tail32:", blob[-32:].hex())
-                # print("  last2 :", blob[-2:].hex(), "(0xffff marker for 622+:", blob[-2:] == b'\xff\xff', ")")
-                meta = parse_model_header_any(blob)
-                print(f"  model {model_id} (type {t}): v={meta.vcount}, f={meta.fcount}, tex={meta.tcount}")
-            except Exception as e:
-                print(f"  model {model_id} error: {e}")
-    
-    
-    print("Summary:",
-          f"objects={stats['objects']}",
-          f"with_models={stats['with_models']}",
-          f"models_total={stats['models_total']}",
-          f"ok={stats['models_ok']}",
-          f"missing={stats['models_missing']}",
-          f"errors={stats['models_err']}",
-          f"out_of_range={stats['models_out_of_range']}",
-          f"trailer_mismatch={stats['trailer_mismatch']}")
 
 def get_objects_with_gltf(object_type_pairs: list[tuple[int,int]], out_dir: str = ".", hide_untextured: bool = False) -> dict[str, dict]:
     """
@@ -1688,9 +1690,17 @@ def get_objects_with_gltf(object_type_pairs: list[tuple[int,int]], out_dir: str 
     import os
 
     results: dict[str, dict] = {}
+    cache_updated = False
+    global _CURRENT_DEBUG_OBJECT_ID, _CURRENT_DEBUG_MODEL_ID
     for obj_id, model_type in object_type_pairs:
+        _CURRENT_DEBUG_OBJECT_ID = obj_id
+        _CURRENT_DEBUG_MODEL_ID = None
         key = f"{obj_id}-{model_type}"
         entry: dict = {}
+        cached_entry = _OBJECT_CACHE.get(key)
+        if cached_entry:
+            results[key] = copy.deepcopy(cached_entry)
+            continue
         try:
             obj = od_cache.get(obj_id)
             entry["objectdef"] = asdict(obj)
@@ -1712,38 +1722,81 @@ def get_objects_with_gltf(object_type_pairs: list[tuple[int,int]], out_dir: str 
             # Append remaining available types as fallback
             types_to_try += [t for t in obj.model_ids_by_t.keys() if t != model_type]
 
+            sx = (obj.modelSizeX or 128) / 128.0
+            sy = (obj.modelSizeH or 128) / 128.0
+            sz = (obj.modelSizeY or 128) / 128.0
+            tx = float(obj.offsetX)
+            ty = float(-(obj.offsetH or 0))
+            tz = float(obj.offsetY)
+
             for t in types_to_try:
                 tried_types.append(t)
                 mids = obj.model_ids_by_t.get(t, [])
+                component_meshes: list[dict] = []
+                component_paths: list[str] = []
+                used_model_ids_local: list[int] = []
+
                 for model_id in mids:
+                    _CURRENT_DEBUG_MODEL_ID = model_id
+                    debug_print(f"    trying model {model_id} for object {obj_id}", obj_id=obj_id, model_id=model_id)
                     try:
                         if not is_valid_model_id(model_id, model_index):
+                            debug_print(f"    model {model_id} out of range; skipping", obj_id=obj_id, model_id=model_id)
                             continue
                         blob = read_model_blob(model_id, model_index)
                         meta = parse_model_header_any(blob)
-                        # Debug: report chosen layout and key section lengths
                         try:
-                            print(f"    model {model_id} layout={getattr(meta,'layout',None)} v={getattr(meta,'vcount',None)} f={getattr(meta,'fcount',None)} t={getattr(meta,'tcount',None)}")
-                            for key in ("v_flags","vert_x","vert_y","vert_z","tri_types","tri_cmds","face_idx16","colours","tex_idx"):
-                                if key in meta.offs:
-                                    off,len_ = meta.offs[key]
-                                    print(f"      section {key}: off={off} len={len_}")
+                            debug_print(
+                                f"    model {model_id} layout={getattr(meta,'layout',None)} "
+                                f"v={getattr(meta,'vcount',None)} f={getattr(meta,'fcount',None)} "
+                                f"t={getattr(meta,'tcount',None)}",
+                                obj_id=obj_id,
+                                model_id=model_id,
+                            )
+                            for section in ("v_flags","vert_x","vert_y","vert_z","tri_types","tri_cmds","face_idx16","colours","tex_idx"):
+                                if section in meta.offs:
+                                    off,len_ = meta.offs[section]
+                                    debug_print(
+                                        f"      section {section}: off={off} len={len_}",
+                                        obj_id=obj_id,
+                                        model_id=model_id,
+                                    )
                         except Exception:
                             pass
                         verts, faces, face_cols, face_tex = decode_geom_525_622(_gunzip_maybe(blob), meta)
+                        if obj_id == 1011:
+                            print(
+                                f"[face-tex] object {obj_id} model {model_id} face_tex={face_tex} face_cols={face_cols} "
+                                f"unique={sorted(set(face_tex))}"
+                            )
 
-                        # UVs best-effort: if any step fails, proceed without UVs
+                        original_cols = getattr(obj, "originalModelColors", []) or []
+                        modified_cols = getattr(obj, "modifiedModelColors", []) or []
+
+                        if (
+                            ENABLE_RECOLOURING
+                            and original_cols
+                            and modified_cols
+                            and len(original_cols) == len(modified_cols)
+                        ):
+                            face_cols = remap_face_colours(
+                                face_cols,
+                                face_tex,
+                                original_cols,
+                                modified_cols,
+                            )
+
                         merged_uvs = None
                         try:
                             face_uvs_type0 = compute_type0_face_uvs_525_622(_gunzip_maybe(blob), meta, verts, faces)
                         except Exception as e_uv0:
                             face_uvs_type0 = None
-                            print(f"    UV type0 compute error: {e_uv0}")
+                            debug_print(f"    UV type0 compute error: {e_uv0}", obj_id=obj_id, model_id=model_id)
                         try:
                             face_uvs_type1 = compute_type1_face_uvs_525_622(_gunzip_maybe(blob), meta, verts, faces)
                         except Exception as e_uv1:
                             face_uvs_type1 = None
-                            print(f"    UV type1 compute error: {e_uv1}")
+                            debug_print(f"    UV type1 compute error: {e_uv1}", obj_id=obj_id, model_id=model_id)
                         try:
                             if face_uvs_type0 is not None or face_uvs_type1 is not None:
                                 merged_uvs = []
@@ -1753,48 +1806,115 @@ def get_objects_with_gltf(object_type_pairs: list[tuple[int,int]], out_dir: str 
                                     merged_uvs.append(uv0 if uv0 is not None else uv1)
                         except Exception as e_merge:
                             merged_uvs = None
-                            print(f"    UV merge error: {e_merge}")
+                            debug_print(f"    UV merge error: {e_merge}", obj_id=obj_id, model_id=model_id)
 
-                        # Transform from ObjectDef (match client axis order)
-                        sx = (obj.modelSizeX or 128) / 128.0
-                        sy = (obj.modelSizeH or 128) / 128.0
-                        sz = (obj.modelSizeY or 128) / 128.0
-                        tx = float(obj.offsetX)
-                        ty = float(-(obj.offsetH or 0))
-                        tz = float(obj.offsetY)
-
-                        # Export path
                         filename = f"object_{obj_id}_type_{t}_model_{model_id}.gltf"
                         out_path = os.path.join(out_dir, filename)
+                        if not os.path.exists(out_path):
+                            write_gltf_positions_indices(
+                                verts, faces, out_path,
+                                face_colors=face_cols,
+                                flip_y=True,
+                                compute_normals=True,
+                                node_translation=(tx, ty, tz), node_scale=(sx, sy, sz),
+                                bake_rs_shading=False,
+                                brightness_scale=0.85,
+                                apply_rs_lighting=True,
+                                face_uvs=merged_uvs,
+                                textured_faces=face_tex,
+                                hide_untextured=hide_untextured,
+                                min_lightness_untextured=0.08
+                            )
+                        component_meshes.append({
+                            "verts": verts,
+                            "faces": faces,
+                            "face_cols": face_cols,
+                            "face_tex": face_tex,
+                            "uvs": merged_uvs,
+                        })
+                        component_paths.append(out_path)
+                        used_model_ids_local.append(model_id)
+                    except Exception as e:
+                        try:
+                            tb = traceback.format_exc()
+                        except Exception:
+                            tb = str(e)
+                        debug_print(f"  model {model_id} (type {t}) decode/export error: {e}\n{tb}",
+                                    obj_id=obj_id, model_id=model_id)
+                        continue
 
+                if not component_meshes:
+                    continue
+
+                debug_print(f"  collected {len(component_meshes)} component meshes for object {obj_id} type {t}",
+                            obj_id=obj_id, model_id=_CURRENT_DEBUG_MODEL_ID)
+
+                entry["component_gltfs"] = component_paths
+                entry["used_model_type"] = t
+                entry["used_model_ids"] = used_model_ids_local
+
+                if len(component_meshes) > 1:
+                    debug_print(f"    attempting merged export with {len(component_meshes)} components",
+                                obj_id=obj_id, model_id=_CURRENT_DEBUG_MODEL_ID)
+                    combined_verts: list[tuple[int, int, int]] = []
+                    combined_faces: list[tuple[int, int, int]] = []
+                    combined_cols: list[int] = []
+                    combined_tex: list[bool] = []
+                    combined_uvs: list | None = None
+
+                    for comp in component_meshes:
+                        base_index = len(combined_verts)
+                        comp_faces = comp["faces"]
+                        combined_verts.extend(comp["verts"])
+                        combined_faces.extend([(a + base_index, b + base_index, c + base_index) for (a, b, c) in comp_faces])
+                        combined_cols.extend(comp["face_cols"])
+                        combined_tex.extend(comp["face_tex"])
+
+                        comp_uvs = comp["uvs"]
+                        if combined_uvs is not None:
+                            if comp_uvs is None:
+                                combined_uvs.extend([None] * len(comp_faces))
+                            else:
+                                combined_uvs.extend(comp_uvs)
+                        elif comp_uvs is not None:
+                            combined_uvs = []
+                            combined_uvs.extend([None] * (len(combined_faces) - len(comp_faces)))
+                            combined_uvs.extend(comp_uvs)
+
+                    merged_filename = f"object_{obj_id}_type_{t}_merged.gltf"
+                    merged_path = os.path.join(out_dir, merged_filename)
+                    try:
+                        debug_print(f"    writing merged GLTF to {merged_path}",
+                                    obj_id=obj_id, model_id=_CURRENT_DEBUG_MODEL_ID)
                         write_gltf_positions_indices(
-                            verts, faces, out_path,
-                            face_colors=face_cols,
+                            combined_verts, combined_faces, merged_path,
+                            face_colors=combined_cols,
                             flip_y=True,
                             compute_normals=True,
                             node_translation=(tx, ty, tz), node_scale=(sx, sy, sz),
                             bake_rs_shading=False,
                             brightness_scale=0.85,
                             apply_rs_lighting=True,
-                            face_uvs=merged_uvs,
-                            textured_faces=face_tex,
+                            face_uvs=combined_uvs,
+                            textured_faces=combined_tex,
                             hide_untextured=hide_untextured,
                             min_lightness_untextured=0.08
                         )
-                        gltf_path = out_path
-                        entry["used_model_type"] = t
-                        entry["used_model_id"] = model_id
-                        break
-                    except Exception as e:
-                        try:
-                            tb = traceback.format_exc()
-                        except Exception:
-                            tb = str(e)
-                        print(f"  model {model_id} (type {t}) decode/export error: {e}\n{tb}")
-                        # Try next model id / type
-                        continue
-                if gltf_path:
-                    break
+                        entry["merged_gltf"] = merged_path
+                        debug_print(f"    merged export succeeded: {merged_path}",
+                                    obj_id=obj_id, model_id=_CURRENT_DEBUG_MODEL_ID)
+                    except Exception as merge_export_err:
+                        debug_print(f"    merged export failed: {merge_export_err}",
+                                    obj_id=obj_id, model_id=_CURRENT_DEBUG_MODEL_ID)
+                    gltf_path = merged_path
+                    entry["gltf"] = merged_path
+                else:
+                    debug_print("    only one component mesh -> skipping merged export",
+                                obj_id=obj_id, model_id=_CURRENT_DEBUG_MODEL_ID)
+                    gltf_path = gltf_path or component_paths[0]
+                    entry["gltf"] = gltf_path
+
+                break
         except Exception:
             pass
 
@@ -1802,117 +1922,15 @@ def get_objects_with_gltf(object_type_pairs: list[tuple[int,int]], out_dir: str 
         if not gltf_path:
             entry["note"] = "no suitable model exported; object may lack models or all failed to decode"
         results[key] = entry
+        _OBJECT_CACHE[key] = copy.deepcopy(entry)
+        cache_updated = True
+    if cache_updated:
+        try:
+            os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
+            with open(CACHE_PATH, 'wb') as _fh:
+                pickle.dump(_OBJECT_CACHE, _fh, protocol=pickle.HIGHEST_PROTOCOL)
+        except Exception as cache_err:
+            debug_print(f'Failed to update object cache: {cache_err}')
     return results
-
-
-def generategltf():
-    # pick an object and one of its model ids
-    obj_id = 6
-    obj = od_cache.get(obj_id)
-    
-    # take the first model id we see (or choose a specific one)
-    any_t, mids = next(iter(obj.model_ids_by_t.items()))
-    model_id = mids[0]
-    
-    # read + parse header
-    blob = read_model_blob(model_id, model_index)
-    meta = parse_model_header_any(blob)
-    
-    # decode geometry (525/622)
-    verts, faces, face_cols, face_tex = decode_geom_525_622(_gunzip_maybe(blob), meta)
-    
-    print(f"decoded verts={len(verts)} faces={len(faces)}; first verts: {verts[:4]}, faces: {faces[:4]}")
-    # Debug: trailer/layout + sections
-    tex_off = meta.offs.get("tex_idx") if hasattr(meta, "offs") else None
-    print("layout=", getattr(meta, "layout", None), "v=", getattr(meta, "vcount", None),
-          "f=", getattr(meta, "fcount", None), "t=", getattr(meta, "tcount", None))
-    print("tex_idx present:", tex_off is not None, "len:", (tex_off[1] if tex_off else 0))
-    # Debug: face stats
-    total_f = len(faces)
-    tex_cnt = sum(1 for x in face_tex if x)
-    col655 = sum(1 for c in face_cols if c == 65535)
-    # HSL lightness distribution
-    try:
-        L_vals = [rs_colour_to_hsl(c)[2] for c in face_cols]
-        low_006 = sum(1 for l in L_vals if l < 0.06)
-        low_010 = sum(1 for l in L_vals if l < 0.10)
-        print(f"faces={total_f} textured={tex_cnt} colour==65535={col655} lowL<0.06={low_006} lowL<0.10={low_010}")
-    except Exception as _e:
-        print(f"faces={total_f} textured={tex_cnt} colour==65535={col655}")
-    # Samples
-    sample_n = min(12, total_f)
-    print("sample (tex,colour)[:12] =", [(face_tex[i], face_cols[i]) for i in range(sample_n)])
-    print("first textured idxs:", [i for i,t in enumerate(face_tex) if t][:12])
-    # Debug: inspect tex_idx raw values vs tcount
-    if "tex_idx" in meta.offs:
-        off_tex, len_tex = meta.offs["tex_idx"]
-        import struct as _s
-        raw_tex = [_s.unpack_from(">H", _gunzip_maybe(blob), off_tex + 2*i)[0] for i in range(total_f)]
-        nonzero = [v for v in raw_tex if v != 0 and v != 65535]
-        within = sum(1 for v in raw_tex if (v != 0 and v != 65535 and (v-1) < getattr(meta, "tcount", 0)))
-        print(f"tex_idx: min={min(nonzero) if nonzero else None} max={max(nonzero) if nonzero else None} within_tcount={within}/{len(nonzero)}")
-        print("tex_idx sample[:12]=", raw_tex[:12])
-    
-    # Build transform from ObjectDef (scale order matches client scale(scaleX, scaleZ, scaleY))
-    sx = (obj.modelSizeX or 128) / 128.0
-    sy = (obj.modelSizeH or 128) / 128.0
-    sz = (obj.modelSizeY or 128) / 128.0
-    # Exporter flips Y, so negate vertical offset (offsetH)
-    tx = float(obj.offsetX)
-    ty = float(-(obj.offsetH or 0))
-    tz = float(obj.offsetY)
-
-    # Optional: compute minimal Type-0 UVs (tri->tri mapping). Toggle here.
-    enable_type0_uvs = True
-    face_uvs_type0 = compute_type0_face_uvs_525_622(_gunzip_maybe(blob), meta, verts, faces) if enable_type0_uvs else None
-    if enable_type0_uvs and face_uvs_type0 is not None:
-        uv_faces = sum(1 for x in face_uvs_type0 if x is not None)
-        print(f"type0 uv faces={uv_faces}/{len(faces)}")
-        sample_uv_idx = [i for i,x in enumerate(face_uvs_type0) if x is not None][:12]
-        print("uv sample idxs:", sample_uv_idx)
-        if sample_uv_idx:
-            print("uv sample[0]:", face_uvs_type0[sample_uv_idx[0]])
-    # Optional: Type-1 UVs (approx barycentric using tex_type1A tri points)
-    enable_type1_uvs = True
-    face_uvs_type1 = compute_type1_face_uvs_525_622(_gunzip_maybe(blob), meta, verts, faces) if enable_type1_uvs else None
-    if enable_type1_uvs and face_uvs_type1 is not None:
-        uv1_faces = sum(1 for x in face_uvs_type1 if x is not None)
-        print(f"type1 uv faces={uv1_faces}/{len(faces)}")
-
-    # Merge UVs: prefer type0, else type1
-    merged_uvs = None
-    if face_uvs_type0 is not None or face_uvs_type1 is not None:
-        merged_uvs = []
-        for i in range(len(faces)):
-            uv0 = face_uvs_type0[i] if (face_uvs_type0 and i < len(face_uvs_type0)) else None
-            uv1 = face_uvs_type1[i] if (face_uvs_type1 and i < len(face_uvs_type1)) else None
-            merged_uvs.append(uv0 if uv0 is not None else uv1)
-
-    # Show all faces (including textured) using HSL colours (no masking).
-    face_cols_masked = face_cols
-
-    out = write_gltf_positions_indices(
-        verts, faces, f"model_{model_id}.gltf",
-        face_colors=face_cols_masked,
-        flip_y=True,
-        compute_normals=True,
-        node_translation=(tx, ty, tz), node_scale=(sx, sy, sz),
-        bake_rs_shading=False,
-        brightness_scale=0.85,
-        apply_rs_lighting=True,
-        face_uvs=merged_uvs,
-        textured_faces=face_tex,
-        hide_untextured=False,
-        min_lightness_untextured=0.08
-    )
-    print("wrote", out)
-    
-if __name__ == "__main__":
-    generategltf()
-
-
-
-
-
 
 

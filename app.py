@@ -1,10 +1,27 @@
-import os
+﻿import os
 from flask import Flask, render_template, request, abort, send_file, jsonify
 from flask import Response
-
+from flask_compress import Compress
 from .ObjectDefinition import get_objects_with_gltf
 
 app = Flask(__name__)
+compress = Compress()
+compress.init_app(app)
+
+def json_safe(value):
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except Exception:
+            return value.hex()
+    if isinstance(value, dict):
+        return {k: json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [json_safe(v) for v in value]
+    return str(value)
+
 
 @app.route("/")
 def hello_world():
@@ -40,79 +57,76 @@ def favicon():
 @app.post("/api/gltf")
 def generate_and_send_gltf():
     """
-    Accepts JSON with a list of (object_id, model_type) pairs and returns the GLTF for the first item.
-    Expected JSON shapes:
-      { "objects": [[123, 10]] }  OR  { "objects": [{"id":123, "type":10}] }
+    Accepts JSON with a list of (object_id, model_type) pairs and returns
+    metadata for every unique pair. Duplicate entries in the request are
+    deduplicated so the exporter only runs once per object.
 
-    For each object in the list, the exporter writes the GLTF into babylon/static/objects.
-    For now, this endpoint returns the GLTF file for the first pair only.
+    Expected JSON shapes:
+      { "objects": [[123, 10], ...] }
+      { "objects": [{"id": 123, "type": 10}, ...] }
+
+    Response JSON shape:
+      {
+        "objects": [ { ... per unique object ... } ],
+        "request_map": [int index into objects for each request item]
+      }
     """
     data = request.get_json(silent=True)
-    print("data: ", data)
     if not data or "objects" not in data:
         return jsonify({"error": "Expected JSON: { 'objects': [[id, type], ...] }"}), 400
 
-    objects = data.get("objects")
-    if not isinstance(objects, list) or len(objects) == 0:
+    raw_objects = data.get("objects")
+    if not isinstance(raw_objects, list) or len(raw_objects) == 0:
         return jsonify({"error": "'objects' must be a non-empty list"}), 400
 
-    # Normalize to list[tuple[int,int]]
-    pairs: list[tuple[int, int]] = []
+    unique_pairs: list[tuple[int, int]] = []
+    pair_index: dict[tuple[int, int], int] = {}
+    request_map: list[int] = []
+
+    def parse_item(item):
+        if isinstance(item, dict):
+            oid = item.get("id")
+            typ = item.get("type")
+        else:
+            try:
+                oid, typ = item
+            except Exception as exc:
+                raise ValueError("Each item must be [id, type] or {id, type}") from exc
+        if oid is None or typ is None:
+            raise ValueError("Each item must include both id and type")
+        return int(oid), int(typ)
+
     try:
-        for item in objects:
-            if isinstance(item, dict):
-                oid = int(item.get("id"))
-                typ = int(item.get("type"))
-            else:
-                oid = int(item[0])
-                typ = int(item[1])
-            pairs.append((oid, typ))
+        for item in raw_objects:
+            oid, typ = parse_item(item)
+            key = (oid, typ)
+            if key not in pair_index:
+                pair_index[key] = len(unique_pairs)
+                unique_pairs.append(key)
+            request_map.append(pair_index[key])
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
     except Exception:
         return jsonify({"error": "Each item must be [id, type] or {id, type}"}), 400
 
-    # Output directory under static
     objects_dir = os.path.join(os.path.dirname(__file__), "static", "objects")
     os.makedirs(objects_dir, exist_ok=True)
 
-    # Generate/export as needed using provided utility
-    print("/api/gltf request:", pairs)
-    results = get_objects_with_gltf(pairs, out_dir=objects_dir, hide_untextured=False)
+    results = get_objects_with_gltf(unique_pairs, out_dir=objects_dir, hide_untextured=False)
+    response_objects = []
+    for oid, typ in unique_pairs:
+        key = f"{oid}-{typ}"
+        entry = results.get(key, {}).copy() if key in results else {}
+        entry.setdefault("object_id", oid)
+        entry.setdefault("model_type", typ)
+        response_objects.append(json_safe(entry))
+        if(key == "1011-10"):
+            print(entry)
 
-    # For now, return only the first GLTF produced
-    first_key = next(iter(results.keys()))
-    entry = results[first_key]
-    gltf_path = entry.get("gltf") if isinstance(entry, dict) else None
-    if not gltf_path or gltf_path == "no model" or not os.path.exists(gltf_path):
-        print("/api/gltf: generation failed:", entry)
-        def json_safe(x):
-            if isinstance(x, (str, int, float, bool)) or x is None:
-                return x
-            if isinstance(x, bytes):
-                try:
-                    return x.decode('utf-8', 'replace')
-                except Exception:
-                    return repr(x)
-            if isinstance(x, dict):
-                return {k: json_safe(v) for k, v in x.items()}
-            if isinstance(x, (list, tuple)):
-                return [json_safe(v) for v in x]
-            return str(x)
-        return jsonify({
-            "error": "No GLTF generated for the requested object",
-            "detail": json_safe(entry)
-        }), 404
+    return jsonify({
+        "objects": response_objects,
+        "request_map": request_map
+    })
 
-    # Serve the GLTF directly and include tile footprint metadata so the client can scale it
-    try:
-        filename = os.path.basename(gltf_path)
-        print("/api/gltf: sending", filename)
-        size_meta = entry.get("objectdef", {}) if isinstance(entry, dict) else {}
-        size_x = size_meta.get("sizeX", 1)
-        size_y = size_meta.get("sizeY", 1)
-        resp = send_file(gltf_path, mimetype="model/gltf+json", download_name=filename, as_attachment=False)
-        resp.headers["X-Object-SizeX"] = str(size_x)
-        resp.headers["X-Object-SizeY"] = str(size_y)
-        return resp
-    except Exception as e:
-        abort(500, description=str(e))
+
 

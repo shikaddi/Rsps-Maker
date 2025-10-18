@@ -1,0 +1,4 @@
+*** Begin Patch
+*** Update File: ObjectDefinition.py
+*** Delete File: ObjectDefinition.py
+*** End Patch
