@@ -10,6 +10,7 @@
 <body style="margin:0; overflow:hidden;">
 <canvas id="renderCanvas" style="width:100%; height:100%;"></canvas>
 <script>window.STATIC_BASE = "{{ url_for('static', filename='') }}";</script>
+<script src="{{ url_for('static', filename='javascript/Helper.js') }}"></script>
 <script src="{{ url_for('static', filename='javascript/UnderlaysData.js') }}"></script>
 <script src="{{ url_for('static', filename='javascript/Debug.js') }}"></script>
 <script src="{{ url_for('static', filename='javascript/GenerateScene.js') }}"></script>
@@ -43,175 +44,185 @@ void main(void) {
   vK = aK;                   // pass through unnormalized
 }
 `;
-  console.log("got here");
   BABYLON.Effect.ShadersStore["rsFragmentShader"] = `
-precision highp float;
-varying vec3 vWorldPos;
-varying float vK; // 0..255
+  precision highp float;
+  varying vec3 vWorldPos;
+  varying float vK; // 0..255
 
-uniform sampler2D uPalette;      // 256x256 RGBA palette
-uniform sampler2D uUnderlayTex;  // gridW x gridH, RGB=H,S,L (0..255)
-uniform sampler2D uOverlayTex;   // gridW x gridH, RGB=H,S,L (0..255)
-uniform sampler2D uMaskTex;      // gridW x gridH, R=mask, G=rot, B=present (0/1)
-uniform vec2 uGridSize;          // (width,height) in tiles
-uniform float uTileSize;         // tile size in world units
+  uniform sampler2D uPalette;      // 256x256 RGBA palette
+  uniform sampler2D uUnderlayTex;  // gridW x gridH, RGB=H,S,L (0..255)
+  uniform sampler2D uOverlayTex;   // gridW x gridH, RGB=H,S,L (0..255)
+  uniform sampler2D uMaskTex;      // gridW x gridH, R=mask, G=rot, B=present (0/1)
+  uniform vec2 uGridSize;          // (width,height) in tiles
+  uniform float uTileSize;         // tile size in world units
 
- // Overlay texture atlas (optional)
-uniform sampler2D uOverlayAtlas;   // atlas of overlay textures (colored or intensity)
-uniform sampler2D uOverlayIndex;   // gridW x gridH, R=low byte of index+1, B=high byte, G=flags (bit0=intensity, bit1=hiTex)
-uniform vec2 uAtlasDims;           // (cols, rows)
-uniform vec2 uAtlasSizePx;         // (atlasWidth, atlasHeight) in pixels
-uniform float uHD;                 // 1=HD textures on, 0=monocolor for tid>50
+  // Overlay texture atlas (optional)
+  uniform sampler2D uOverlayAtlas;         // atlas of static overlay textures (colored or intensity)
+  uniform sampler2D uOverlayIndex;         // gridW x gridH, R=low byte of index+1, B=high byte, G=flags
+  uniform vec2 uAtlasDims;                 // (cols, rows) for static atlas
+  uniform sampler2D uOverlayAtlasAnimated; // atlas for scrolling overlays
+  uniform vec2 uAtlasDimsAnimated;         // (cols, rows) for animated atlas
+  uniform vec2 uAtlasSizePx;               // (atlasWidth, atlasHeight) in pixels
+  uniform float uHD;                       // 1=HD textures on, 0=monocolor for tid>50
 
-// Rotate UV in 90ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â° steps around NW origin (0,0), y+ downward
-vec2 rotateUV(vec2 uv, int rot){
-  if (rot == 0) return uv;                              // 0ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
-  if (rot == 1) return vec2(uv.y, 1.0 - uv.x);          // +90ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â° CW
-  if (rot == 2) return vec2(1.0 - uv.x, 1.0 - uv.y);    // +180ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
-  /* rot == 3 */ return vec2(1.0 - uv.y, uv.x);         // +270ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â° CW
-}
-
-bool maskCovers(int maskId, vec2 uv) {
-  // canonical orientation; uv in [0,1]^2, origin at NW
-  if (maskId == 0) return false;        // transparent
-  if (maskId == 1) return true;         // full tile
-  if (maskId == 2) return (uv.x + uv.y) <= 1.0;                         // big triangle
-  if (maskId == 3) return (2.0*uv.x + uv.y) <= 1.0;                     // slim triangle left
-  if (maskId == 4) return (2.0*(1.0-uv.x) + uv.y) <= 1.0;               // slim triangle right
-  if (maskId == 5) return !((2.0*uv.x + uv.y) <= 1.0);                  // inverse of 3
-  if (maskId == 6) return !((2.0*(1.0-uv.x) + uv.y) <= 1.0);            // inverse of 4
-  if (maskId == 7) return uv.x <= 0.5;                                  // half-rect left
-  if (maskId == 8) return (2.0*uv.x + 2.0*uv.y) <= 1.0;                 // small triangle
-  if (maskId == 9) return !((2.0*uv.x + 2.0*uv.y) <= 1.0);              // inverse of 8
-  if (maskId == 10) {                                                   // quarter circle inverse
-    vec2 p = uv - vec2(1.0, 1.0);                                      // from SE corner
-    return length(p) > 1.0;
+  // Rotate UV in 4 steps around NW origin (0,0), y+ downward
+  vec2 rotateUV(vec2 uv, int rot){
+    if (rot == 0) return uv;                              // 0°
+    if (rot == 1) return vec2(uv.y, 1.0 - uv.x);          // +90° CW
+    if (rot == 2) return vec2(1.0 - uv.x, 1.0 - uv.y);    // +180°
+    /* rot == 3 */ return vec2(1.0 - uv.y, uv.x);         // +270° CW
   }
-  if (maskId == 11) {                                                   // quarter circle
-    vec2 p = uv;                                                        // from NW corner
-    return length(p) <= 1.0;
+
+  bool maskCovers(int maskId, vec2 uv) {
+    // canonical orientation; uv in [0,1]^2, origin at NW
+    if (maskId == 0) return false;        // transparent
+    if (maskId == 1) return true;         // full tile
+    if (maskId == 2) return (uv.x + uv.y) <= 1.0;                         // big triangle
+    if (maskId == 3) return (2.0*uv.x + uv.y) <= 1.0;                     // slim triangle left
+    if (maskId == 4) return (2.0*(1.0-uv.x) + uv.y) <= 1.0;               // slim triangle right
+    if (maskId == 5) return !((2.0*uv.x + uv.y) <= 1.0);                  // inverse of 3
+    if (maskId == 6) return !((2.0*(1.0-uv.x) + uv.y) <= 1.0);            // inverse of 4
+    if (maskId == 7) return uv.x <= 0.5;                                  // half-rect left
+    if (maskId == 8) return (2.0*uv.x + 2.0*uv.y) <= 1.0;                 // small triangle
+    if (maskId == 9) return !((2.0*uv.x + 2.0*uv.y) <= 1.0);              // inverse of 8
+    if (maskId == 10) {                                                   // quarter circle inverse
+      vec2 p = uv - vec2(1.0, 1.0);                                      // from SE corner
+      return length(p) > 1.0;
+    }
+    if (maskId == 11) {                                                   // quarter circle
+      vec2 p = uv;                                                        // from NW corner
+      return length(p) <= 1.0;
+    }
+    if (maskId == 12) {                                                   // thin trapezoid near right
+      // x in [0.8,1], between lines y >= 1-x and y <= x
+      return (uv.x >= 0.8) && (uv.y >= (1.0 - uv.x)) && (uv.y <= uv.x);
+    }
+    return false;
   }
-  if (maskId == 12) {                                                   // thin trapezoid near right
-    // x in [0.8,1], between lines y >= 1-x and y <= x
-    return (uv.x >= 0.8) && (uv.y >= (1.0 - uv.x)) && (uv.y <= uv.x);
+
+  int rotationBias(int maskId){
+    // maskId: 1=full, 2..12=your shapes
+    // start with zeros; tweak specific ones if needed
+    if (maskId == 3)  return 1; // slim tri left: +90°
+    if (maskId == 4)  return 1; // slim tri right: +90°
+    if (maskId == 5)  return 1; // inverse of 3 typically same bias
+    if (maskId == 6)  return 1; // inverse of 4 typically same bias
+    if (maskId == 7)  return 1; // half-rect left looked like +90°
+    if (maskId == 10) return 1; // quarter circle inverse: +90°
+    if (maskId == 11) return 3; // quarter circle: +270°
+    if (maskId == 12) return 2; // Trapezoid: +180°
+    return 0; //2,8,9 (big triangle and small triangles)
   }
-  return false;
-}
 
-int rotationBias(int maskId){
-  // maskId: 1=full, 2..12=your shapes
-  // start with zeros; tweak specific ones if needed
-  if (maskId == 3)  return 1; // slim tri left: +90ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
-  if (maskId == 4)  return 1; // slim tri right: +90ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
-  if (maskId == 5)  return 1; // inverse of 3 typically same bias
-  if (maskId == 6)  return 1; // inverse of 4 typically same bias
-  if (maskId == 7)  return 1; // half-rect left looked like +90ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
-  if (maskId == 10) return 1; // quarter circle inverse: +90ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
-  if (maskId == 11) return 3; // quarter circle: +270ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
-  if (maskId == 12) return 2; // Trapezoid: +180ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
-  return 0; //2,8,9 (big triangle and small triangles)
-}
+  void main(void) {
+    // Determine tile index and tile-local UV
+    vec2 worldXZ = vWorldPos.xz;
+    vec2 tileXY = floor(worldXZ / uTileSize);
+    tileXY = clamp(tileXY, vec2(0.0), uGridSize - vec2(1.0));
+    vec2 tileUV = fract(worldXZ / uTileSize);
 
-void main(void) {
-  // Determine tile index and tile-local UV
-  vec2 worldXZ = vWorldPos.xz;
-  vec2 tileXY = floor(worldXZ / uTileSize);
-  tileXY = clamp(tileXY, vec2(0.0), uGridSize - vec2(1.0));
-  vec2 tileUV = fract(worldXZ / uTileSize);
+    // Sample per-tile attributes
+    vec2 tcoord = (tileXY + vec2(0.5)) / uGridSize;
+    vec3 HSL_U = texture2D(uUnderlayTex, tcoord).rgb * 255.0;
+    vec3 HSL_O = texture2D(uOverlayTex,  tcoord).rgb * 255.0;
+    vec3 MRB   = texture2D(uMaskTex,     tcoord).rgb * 255.0;
+    // If an overlay is present here and the rotated-UV is covered by mask, use Overlay texture/HSL; else Underlay HSL
+    int maskId = int(MRB.r + 0.5);
+    int rot    = int(MRB.g + 0.5);
+    bool present = (MRB.b > 0.5);
+    vec2 uvMask = rotateUV(tileUV, (rot + rotationBias(maskId)) % 4);
+    vec2 uvTex = tileUV;
+    bool fullTile = (maskId == 1);
+    vec3 HSL = HSL_U;
 
-  // Sample per-tile attributes
-  vec2 tcoord = (tileXY + vec2(0.5)) / uGridSize;
-  vec3 HSL_U = texture2D(uUnderlayTex, tcoord).rgb * 255.0;
-  vec3 HSL_O = texture2D(uOverlayTex,  tcoord).rgb * 255.0;
-  vec3 MRB   = texture2D(uMaskTex,     tcoord).rgb * 255.0;
-  // If an overlay is present here and the rotated-UV is covered by mask, use Overlay texture/HSL; else Underlay HSL
-  int maskId = int(MRB.r + 0.5);
-  int rot    = int(MRB.g + 0.5);
-  bool present = (MRB.b > 0.5);
-  vec2 uvRot = rotateUV(tileUV, (rot + rotationBias(maskId)) % 4);
-  bool fullTile = (maskId == 1);
-  vec3 HSL = HSL_U;
+    // Precompute palette base colors for underlay/overlay HSL
+    // Underlay palette color
+    float H6_u = floor(HSL_U.r / 4.0);
+    float S3_u = floor(HSL_U.g / 32.0);
+    float L7_u = floor(HSL_U.b / 2.0);
+    float j_u  = clamp(vK, 0.0, 255.0);
+    float j2_u = floor((j_u * L7_u) / 128.0);
+    if (j2_u < 2.0) j2_u = 2.0; else if (j2_u > 126.0) j2_u = 126.0;
+    float idx_u = H6_u * 1024.0 + S3_u * 128.0 + j2_u;
+    float u_u = (mod(idx_u, 256.0) + 0.5) / 256.0;
+    float v_u = (floor(idx_u / 256.0) + 0.5) / 256.0;
+    vec3 baseUnderRgb = texture2D(uPalette, vec2(u_u, v_u)).rgb;
 
-  // Precompute palette base colors for underlay/overlay HSL
-  // Underlay palette color
-  float H6_u = floor(HSL_U.r / 4.0);
-  float S3_u = floor(HSL_U.g / 32.0);
-  float L7_u = floor(HSL_U.b / 2.0);
-  float j_u  = clamp(vK, 0.0, 255.0);
-  float j2_u = floor((j_u * L7_u) / 128.0);
-  if (j2_u < 2.0) j2_u = 2.0; else if (j2_u > 126.0) j2_u = 126.0;
-  float idx_u = H6_u * 1024.0 + S3_u * 128.0 + j2_u;
-  float u_u = (mod(idx_u, 256.0) + 0.5) / 256.0;
-  float v_u = (floor(idx_u / 256.0) + 0.5) / 256.0;
-  vec3 baseUnderRgb = texture2D(uPalette, vec2(u_u, v_u)).rgb;
+    // Overlay palette color (for intensity maps)
+    float H6_o = floor(HSL_O.r / 4.0);
+    float S3_o = floor(HSL_O.g / 32.0);
+    float L7_o = floor(HSL_O.b / 2.0);
+    float j_o  = j_u; // same brightness term
+    float j2_o = floor((j_o * L7_o) / 128.0);
+    if (j2_o < 2.0) j2_o = 2.0; else if (j2_o > 126.0) j2_o = 126.0;
+    float idx_o = H6_o * 1024.0 + S3_o * 128.0 + j2_o;
+    float u_o = (mod(idx_o, 256.0) + 0.5) / 256.0;
+    float v_o = (floor(idx_o / 256.0) + 0.5) / 256.0;
+    vec3 baseOverlayRgb = texture2D(uPalette, vec2(u_o, v_o)).rgb;
 
-  // Overlay palette color (for intensity maps)
-  float H6_o = floor(HSL_O.r / 4.0);
-  float S3_o = floor(HSL_O.g / 32.0);
-  float L7_o = floor(HSL_O.b / 2.0);
-  float j_o  = j_u; // same brightness term
-  float j2_o = floor((j_o * L7_o) / 128.0);
-  if (j2_o < 2.0) j2_o = 2.0; else if (j2_o > 126.0) j2_o = 126.0;
-  float idx_o = H6_o * 1024.0 + S3_o * 128.0 + j2_o;
-  float u_o = (mod(idx_o, 256.0) + 0.5) / 256.0;
-  float v_o = (floor(idx_o / 256.0) + 0.5) / 256.0;
-  vec3 baseOverlayRgb = texture2D(uPalette, vec2(u_o, v_o)).rgb;
+    // Overlay texture path
+    vec4 idxSample     = texture2D(uOverlayIndex, tcoord);
+    float texIndexLow  = floor(idxSample.r * 255.0 + 0.5);
+    float texIndexHigh = floor(idxSample.b * 255.0 + 0.5);
+    float texIndexPlus = texIndexLow + texIndexHigh * 256.0;
+    float texFlagsByte = floor(idxSample.g * 255.0 + 0.5);
+    bool hasTex = (texIndexPlus >= 1.0);
+    float flagIntensity = mod(texFlagsByte, 2.0);
+    float flagHiTex = mod(floor(texFlagsByte / 2.0), 2.0);
+    float flagAnimated = mod(floor(texFlagsByte / 4.0), 2.0);
+    bool isIntensity = (flagIntensity >= 1.0);
+    bool hiTex = (flagHiTex >= 1.0);
+    bool useAnimatedAtlas = (flagAnimated >= 1.0);
+    bool hdEnabled = (uHD > 0.5);
+    bool debugTile = (int(tileXY.x + 0.5) == 24) && (int(tileXY.y + 0.5) == 24);
 
-  // Overlay texture path
-  vec4 idxSample     = texture2D(uOverlayIndex, tcoord);
-  float texIndexLow  = floor(idxSample.r * 255.0 + 0.5);
-  float texIndexHigh = floor(idxSample.b * 255.0 + 0.5);
-  float texIndexPlus = texIndexLow + texIndexHigh * 256.0;
-  float texFlagsByte = floor(idxSample.g * 255.0 + 0.5);
-  bool hasTex = (texIndexPlus >= 1.0);
-  bool isIntensity = (mod(texFlagsByte, 2.0) >= 1.0);
-  bool hiTex = (mod(floor(texFlagsByte / 2.0), 2.0) >= 1.0);
-  bool hdEnabled = (uHD > 0.5);
-  bool debugTile = (int(tileXY.x + 0.5) == 24) && (int(tileXY.y + 0.5) == 24);
+    vec4 finalColor = vec4(baseUnderRgb, 1.0);
+    bool usedTexture = false;
+    if (present && maskCovers(maskId, uvMask) && hasTex && (hdEnabled || !hiTex)) {
+      float texIndex = texIndexPlus - 1.0;
+      float cols = useAnimatedAtlas ? uAtlasDimsAnimated.x : uAtlasDims.x;
+      float rows = useAnimatedAtlas ? uAtlasDimsAnimated.y : uAtlasDims.y;
+      float c = mod(texIndex, cols);
+      float r = floor(texIndex / cols);
+      vec2 cellSize = vec2(1.0/cols, 1.0/rows);
+      float invRow = rows - 1.0 - r;
+      vec2 atlasUV = vec2((c + uvTex.x) * cellSize.x,
+                          (invRow + uvTex.y) * cellSize.y);
 
-  vec4 finalColor = vec4(baseUnderRgb, 1.0);
-  bool usedTexture = false;
-  if (present && maskCovers(maskId, uvRot) && hasTex && (hdEnabled || !hiTex)) {
-    float texIndex = texIndexPlus - 1.0;
-    float cols = uAtlasDims.x;
-    float rows = uAtlasDims.y;
-    float c = mod(texIndex, cols);
-    float r = floor(texIndex / cols);
-    vec2 cellSize = vec2(1.0/cols, 1.0/rows);
-    float invRow = rows - 1.0 - r;
-    vec2 atlasUV = vec2((c + uvRot.x) * cellSize.x,
-                        (invRow + uvRot.y) * cellSize.y);
-
-    vec4 sampleColor = texture2D(uOverlayAtlas, atlasUV);
-    if (isIntensity) {
-      float intensity = sampleColor.r; // grayscale 0..1
-      finalColor = vec4(baseOverlayRgb * intensity, 1.0);
-    } else {
-      if (fullTile) {
-        // Full-tile colored overlay: treat as opaque replacement (ignore alpha)
-        finalColor = vec4(sampleColor.rgb, 1.0);
+      vec4 sampleColor;
+      if (useAnimatedAtlas) {
+        sampleColor = texture(uOverlayAtlasAnimated, atlasUV);
       } else {
-        // Alpha blend colored texture over the underlay palette color
-        vec3 over = sampleColor.rgb;
-        float a = clamp(sampleColor.a, 0.0, 1.0);
-        vec3 blended = mix(baseUnderRgb, over, a);
-        finalColor = vec4(blended, 1.0);
+        sampleColor = texture(uOverlayAtlas, atlasUV);
+      }
+      if (isIntensity) {
+        float intensity = sampleColor.r; // grayscale 0..1
+        finalColor = vec4(baseOverlayRgb * intensity, 1.0);
+      } else {
+        if (fullTile) {
+          // Full-tile colored overlay: treat as opaque replacement (ignore alpha)
+          finalColor = vec4(sampleColor.rgb, 1.0);
+        } else {
+          // Alpha blend colored texture over the underlay palette color
+          vec3 over = sampleColor.rgb;
+          float a = clamp(sampleColor.a, 0.0, 1.0);
+          vec3 blended = mix(baseUnderRgb, over, a);
+          finalColor = vec4(blended, 1.0);
+        }
+      }
+      usedTexture = true;
+    }
+
+    // If no texture used, fall back to palette path using chosen HSL (overlay or underlay)
+    if (!usedTexture) {
+      if (present && maskCovers(maskId, uvMask)) {
+        // No texture: use overlay palette color; else underlay already in finalColor
+        finalColor = vec4(baseOverlayRgb, 1.0);
       }
     }
-    usedTexture = true;
-  }
 
-  // If no texture used, fall back to palette path using chosen HSL (overlay or underlay)
-  if (!usedTexture) {
-    if (present && maskCovers(maskId, uvRot)) {
-      // No texture: use overlay palette color; else underlay already in finalColor
-      finalColor = vec4(baseOverlayRgb, 1.0);
-    }
-  }
-
-  gl_FragColor = finalColor;
-}
-`;
+    gl_FragColor = finalColor;
+  }`;
   // Colors are computed inside generateScene from tile underlay ids.
   const scene = await generateScene(tileData, nodeHeights, vertexBrightness);
 
@@ -347,7 +358,7 @@ function setupClampedArcCam(scene, gridW, gridH, tileSize = 1, canvas) {
   );
 
   // Clamp rotation (prevents going under the map and from going perfectly top-down)
-  const EPS = 0.34;        // ~20ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
+  const EPS = 0.34;        // ~20°
   cam.lowerBetaLimit = EPS;                 // donÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢t go perfectly vertical above
   cam.upperBetaLimit = Math.PI / 2 - EPS;   // keep above horizon
 
