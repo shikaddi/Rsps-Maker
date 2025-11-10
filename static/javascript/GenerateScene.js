@@ -1,20 +1,5 @@
 let paletteTex  = null;
 
-// Resolve a Flask static URL for an asset path under the static folder.
-// Expects template to optionally set window.STATIC_BASE = "{{ url_for('static', filename='') }}"
-// Falls back to "/static/" if not provided.
-function staticUrl(path) {
-  const base = (typeof window !== 'undefined' && window.STATIC_BASE) ? String(window.STATIC_BASE) : '/static/';
-  const baseNorm = base.endsWith('/') ? base : (base + '/');
-  const pathNorm = String(path || '').replace(/^\/+/, '');
-  let url = baseNorm + pathNorm;
-  // Guard against accidental relative URLs if STATIC_BASE was misconfigured
-  if (!/^([a-z]+:)?\/\//i.test(url) && !url.startsWith('/')) {
-    url = '/static/' + url.replace(/^\/+/, '');
-  }
-  return url;
-}
-
 async function generateScene(tileData, nodeHeights, vertexBrightness) {
   const scene = new BABYLON.Scene(engine);
   scene.clearColor = new BABYLON.Color3(0.5, 0.7, 1.0);
@@ -27,24 +12,7 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
   const underlayIdGrid = tileData.map(row => row.map(t => t.underlayId));
   const overlayIdGrid  = tileData.map(row => row.map(t => t.overlayId));
 
-  // Build overlays dataset with RS fallbacks for early texture ids that have rgb=0
-  const overlayFallbackPackedByTexId = [
-    /* 0..49 */
-    41, 39248, 41, 4643, 41, 41, 41, 41, 41, 41,
-    41, 41, 41, 41, 41, 43086, 41, 41, 41, 41,
-    41, 41, 41, 8602, 41, 28992, 41, 41, 41, 41,
-    41, 5056, 41, 41, 41, 7079, 41, 41, 41, 41,
-    41, 41, 41, 41, 41, 41, 3131, 41, 41, 41
-  ];
-
-  function unpackPackedHslToHslTriplet(packed) {
-    const H6 = (packed >>> 10) & 0x3F;
-    const S3 = (packed >>> 7)  & 0x07;
-    const L7 = (packed)        & 0x7F;
-    // Expand back to 0..255-ish domain expected by packRsHsl
-    return { h: (H6 << 2), s: (S3 << 5), l: (L7 << 1) };
-  }
-
+  const cellSize = 64; // overlay atlas cells (source textures are 128px, but we downsample to 64px)
   const overlayScrollPxPerTick = new Map([
     [1,  { x: 1, y: 0 }],
     [17, { x: 1, y: 0 }],
@@ -58,50 +26,237 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
   const overlayScrollSpeeds = new Float32Array(MAX_OVERLAY_SCROLL_SLOTS * 2);
   let overlayScrollState = null;
   const slotScratchCanvas = new Map();
-  let atlasCanvas = null;
-  let atlasCtx = null;
-  let atlasTexCtx = null;
-  let atlasSlotMeta = [];
+  let animatedAtlasCtx = null;
+  let animatedAtlasTexCtx = null;
+  let animatedAtlasSlotMeta = [];
+  let animatedAtlasTex = null;
+
+  /***********************************************************
+   * Helper function definitions
+   ***********************************************************/
+
+  function unpackPackedHslToHslTriplet(packed) {
+      const H6 = (packed >>> 10) & 0x3F;
+      const S3 = (packed >>> 7)  & 0x07;
+      const L7 = (packed)        & 0x7F;
+      // Expand back to 0..255-ish domain expected by packRsHsl
+      return { h: (H6 << 2), s: (S3 << 5), l: (L7 << 1) };
+    }
 
   function redrawAtlasWithOffsets(slotList) {
-    if (!atlasTex || !atlasCtx || !atlasTexCtx) return;
-    let updated = false;
-    for (let i = 0; i < slotList.length; i++) {
-      const slot = slotList[i];
-      if (slot < 0 || slot >= atlasSlotMeta.length) continue;
-      const meta = atlasSlotMeta[slot];
-      if (!meta || !meta.image) continue;
-      const base = slot * 2;
-      const fracX = ((overlayScrollOffsets[base] % 1) + 1) % 1;
-      const fracY = ((overlayScrollOffsets[base + 1] % 1) + 1) % 1;
-      const offsetPxX = fracX * cellSize;
-      const offsetPxY = fracY * cellSize;
-      let scratch = slotScratchCanvas.get(slot);
-      if (!scratch) {
-        const canvas = document.createElement('canvas');
-        canvas.width = canvas.height = cellSize;
-        slotScratchCanvas.set(slot, { canvas, ctx: canvas.getContext('2d') });
-        scratch = slotScratchCanvas.get(slot);
-      }
-      const { canvas, ctx } = scratch;
-      ctx.clearRect(0, 0, cellSize, cellSize);
-      for (let dx = -cellSize; dx <= cellSize; dx += cellSize) {
-        for (let dy = -cellSize; dy <= cellSize; dy += cellSize) {
-          ctx.drawImage(meta.image, dx - offsetPxX, dy - offsetPxY, cellSize, cellSize);
+      if (!animatedAtlasTex || !animatedAtlasCtx || !animatedAtlasTexCtx) return;
+      let updated = false;
+      for (let i = 0; i < slotList.length; i++) {
+        const slot = slotList[i];
+        if (slot < 0 || slot >= animatedAtlasSlotMeta.length) continue;
+        const meta = animatedAtlasSlotMeta[slot];
+        if (!meta || !meta.image) continue;
+        const base = slot * 2;
+        const fracX = ((overlayScrollOffsets[base] % 1) + 1) % 1;
+        const fracY = ((overlayScrollOffsets[base + 1] % 1) + 1) % 1;
+        const offsetPxX = fracX * cellSize;
+        const offsetPxY = fracY * cellSize;
+        let scratch = slotScratchCanvas.get(slot);
+        if (!scratch) {
+          const canvas = document.createElement('canvas');
+          canvas.width = cellSize;
+          canvas.height = cellSize;
+          slotScratchCanvas.set(slot, { canvas, ctx: canvas.getContext('2d') });
+          scratch = slotScratchCanvas.get(slot);
         }
+        const { canvas, ctx } = scratch;
+        ctx.clearRect(0, 0, cellSize, cellSize);
+        for (let dx = -cellSize; dx <= cellSize; dx += cellSize) {
+          for (let dy = -cellSize; dy <= cellSize; dy += cellSize) {
+            ctx.drawImage(meta.image, dx - offsetPxX, dy - offsetPxY, cellSize, cellSize);
+          }
+        }
+        const dx = meta.col * cellSize;
+        const dy = meta.row * cellSize;
+
+        animatedAtlasCtx.clearRect(dx, dy, cellSize, cellSize);
+        animatedAtlasCtx.drawImage(canvas, 0, 0, cellSize, cellSize, dx, dy, cellSize, cellSize);
+
+        animatedAtlasTexCtx.clearRect(dx, dy, cellSize, cellSize);
+        animatedAtlasTexCtx.drawImage(canvas, 0, 0, cellSize, cellSize, dx, dy, cellSize, cellSize);
+
+        updated = true;
       }
-      const destX = meta.col * cellSize;
-      const destY = meta.row * cellSize;
-      atlasCtx.clearRect(destX, destY, cellSize, cellSize);
-      atlasCtx.drawImage(canvas, destX, destY);
-      atlasTexCtx.clearRect(destX, destY, cellSize, cellSize);
-      atlasTexCtx.drawImage(canvas, destX, destY);
-      updated = true;
+      if (updated) {
+        animatedAtlasTex.update(true);
+      }
     }
-    if (updated) {
-      atlasTex.update(true);
+
+  function initOverlayScrollState(texIds) {
+    if (!texIds || texIds.length === 0) {
+      overlayScrollState = { slots: [], hasAnimatedSlots: false };
+      return;
+    }
+    overlayScrollOffsets.fill(0);
+    overlayScrollSpeeds.fill(0);
+    slotScratchCanvas.clear();
+    const animatedSlots = [];
+    texIds.forEach((tid, index) => {
+      if (index >= MAX_OVERLAY_SCROLL_SLOTS) return;
+      const def = overlayScrollPxPerTick.get(tid);
+      if (!def) return;
+      const speedPerMsX = (def.x || 0) / OVERLAY_SCROLL_TICK_MS;
+      const speedPerMsY = (def.y || 0) / OVERLAY_SCROLL_TICK_MS;
+      const normX = speedPerMsX / cellSize;
+      const normY = speedPerMsY / cellSize;
+      const base = index * 2;
+      overlayScrollSpeeds[base] = normX;
+      overlayScrollSpeeds[base + 1] = normY;
+      if (normX !== 0 || normY !== 0) {
+        animatedSlots.push(index);
+      }
+    });
+    overlayScrollState = {
+      slots: animatedSlots,
+      hasAnimatedSlots: animatedSlots.length > 0,
+    };
+    if (overlayScrollState.hasAnimatedSlots) {
+      redrawAtlasWithOffsets(animatedSlots);
     }
   }
+
+  function advanceOverlayScroll(deltaMs) {
+    if (!overlayScrollState || !overlayScrollState.hasAnimatedSlots) return;
+    if (deltaMs <= 0) return;
+    const { slots } = overlayScrollState;
+    let dirty = false;
+    for (let i = 0; i < slots.length; i++) {
+      const slot = slots[i];
+      const base = slot * 2;
+      const sx = overlayScrollSpeeds[base];
+      const sy = overlayScrollSpeeds[base + 1];
+      if (sx === 0 && sy === 0) continue;
+      let ox = overlayScrollOffsets[base] + sx * deltaMs;
+      let oy = overlayScrollOffsets[base + 1] + sy * deltaMs;
+      ox = ox - Math.floor(ox);
+      oy = oy - Math.floor(oy);
+      if (ox !== overlayScrollOffsets[base] || oy !== overlayScrollOffsets[base + 1]) {
+        overlayScrollOffsets[base] = ox;
+        overlayScrollOffsets[base + 1] = oy;
+        dirty = true;
+      }
+    }
+    if (dirty) {
+      redrawAtlasWithOffsets(slots);
+    }
+  }
+
+  function buildOverlayAtlasTexture(texIdsSubset, texMetaById, atlasName, options = {}) {
+    if (!texIdsSubset || texIdsSubset.length === 0) {
+      return null;
+    }
+    const texCount = texIdsSubset.length;
+    const cols = Math.max(1, Math.ceil(Math.sqrt(Math.max(1, texCount))));
+    const rows = Math.max(1, Math.ceil(texCount / cols));
+    const atlasW = cols * cellSize;
+    const atlasH = rows * cellSize;
+    const cvs = document.createElement('canvas');
+    cvs.width = atlasW;
+    cvs.height = atlasH;
+    const ctx = cvs.getContext('2d');
+    ctx.clearRect(0, 0, atlasW, atlasH);
+    const slotMeta = new Array(texCount);
+    const indexById = new Map();
+
+    texIdsSubset.forEach((id, index) => {
+      const meta = texMetaById.get(id) || { image: null };
+      console.log("texMetaById: ", texMetaById, " id: ", id, " index: ", index, " meta: ", meta);
+      const img = meta.image;
+      const cx = (index % cols) * cellSize;
+      const cy = Math.floor(index / cols) * cellSize;
+      if (img) {
+        ctx.drawImage(img, cx, cy, cellSize, cellSize);
+      } else {
+        ctx.fillStyle = '#ff00ff';
+        ctx.fillRect(cx, cy, cellSize, cellSize);
+      }
+      slotMeta[index] = {
+        image: img,
+        col: index % cols,
+        row: Math.floor(index / cols),
+        sample: meta.sample || null,
+        isIntensity: !!meta.isIntensity,
+      };
+      indexById.set(id, index);
+    });
+
+    if (options.logSummary) {
+      const summary = texIdsSubset.map((tid, index) => ({
+        textureId: tid,
+        atlasIndex: index,
+        row: Math.floor(index / cols),
+        col: index % cols,
+        intensity: !!(slotMeta[index] && slotMeta[index].isIntensity),
+        sample: slotMeta[index] ? slotMeta[index].sample : null,
+      }));
+      console.table(summary);
+    }
+
+    if (options.previewElementId) {
+      let imgEl = document.getElementById(options.previewElementId);
+      if (!imgEl) {
+        imgEl = document.createElement('img');
+        imgEl.id = options.previewElementId;
+        imgEl.style.position = 'fixed';
+        imgEl.style.bottom = '8px';
+        imgEl.style.right = '8px';
+        imgEl.style.border = '1px solid #ccc';
+        imgEl.style.maxWidth = '320px';
+        imgEl.style.maxHeight = '320px';
+        imgEl.style.background = '#111';
+        imgEl.style.zIndex = 9999;
+        document.body.appendChild(imgEl);
+      }
+      imgEl.src = cvs.toDataURL('image/png');
+      imgEl.title = `Atlas order: ${texIdsSubset.join(', ')}`;
+    }
+
+    const atlasTex = new BABYLON.DynamicTexture(atlasName, { width: atlasW, height: atlasH }, scene, false);
+    const texCtx = atlasTex.getContext();
+    texCtx.drawImage(cvs, 0, 0);
+    atlasTex.update();
+    atlasTex.hasAlpha = true;
+    if (typeof atlasTex.updateSamplingMode === 'function') {
+      atlasTex.updateSamplingMode(BABYLON.Texture.NEAREST_SAMPLINGMODE);
+    } else {
+      atlasTex.samplingMode = BABYLON.Texture.NEAREST_SAMPLINGMODE;
+    }
+    atlasTex.wrapU = atlasTex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
+
+    return {
+      atlasTex,
+      texCtx,
+      canvas: cvs,
+      ctx,
+      cols,
+      rows,
+      slotMeta,
+      indexById,
+    };
+  }
+
+  /**
+   * 
+   * 
+   * End of helper functions
+   *  
+   * 
+   */
+
+  // Build overlays dataset with RS fallbacks for early texture ids that have rgb=0
+  const overlayFallbackPackedByTexId = [
+    /* 0..49 */
+    41, 39248, 41, 4643, 41, 41, 41, 41, 41, 41,
+    41, 41, 41, 41, 41, 43086, 41, 41, 41, 41,
+    41, 41, 41, 8602, 41, 28992, 41, 41, 41, 41,
+    41, 5056, 41, 41, 41, 7079, 41, 41, 41, 41,
+    41, 41, 41, 41, 41, 41, 3131, 41, 41, 41
+  ];
 
   const overlaysEffective = overlays.map((O) => {
     if (!O || typeof O !== 'object') return O;
@@ -128,7 +283,7 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
     }
     return O;
   });
-
+  
   // Precompute blended base H,S,L per tile (client-like)
   const { baseH: baseH_U, baseS: baseS_U, baseL: baseL_U } = buildBlendedBaseHsl(underlayIdGrid, underlays);
   // Overlays: per-tile HSL only
@@ -141,6 +296,7 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
 
   // (coversCorner moved to file scope)
 
+  // --- Build terrain mesh and shared vertices ---
   // Camera
   const camera = new BABYLON.ArcRotateCamera(
     "camera",
@@ -155,28 +311,19 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
   const grid = tileData.length;           // tiles per side
   const vertsPerSide = grid + 1;          // grid nodes
   const positions = [];
-  const colors = [];
   const uvs = [];
   const indices = [];
   const normals = [];
 
   // RGB base-color averaging is obsolete; HSL + palette is used instead.
 
-// ---- Build shared vertices (vertsPerSide ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â vertsPerSide) ----
+  // ---- Build shared vertices (vertsPerSide × vertsPerSide grid)
   for (let z = 0; z < vertsPerSide; z++) {
     for (let x = 0; x < vertsPerSide; x++) {
       const y = nodeHeights[z][x];
       positions.push(x * tileSize, y, z * tileSize);
       uvs.push(x, z);
-      // CPU corner masking path disabled in shader mode; keeping here for fallback/testing
-      // const { h, s, l } = nodeBaseHslOverlayAware(z, x, baseH_U, baseS_U, baseL_U, baseH_O, baseS_O, baseL_O, overlayPresentGrid, tileData);
-      // const packed = packRsHsl(h, s, l);
-      // let kDbg = vertexBrightness[z][x] | 0;
-      // const adjustedPacked = applyRsBrightness(packed, kDbg) & 0xFFFF;
-      // const h6 = (h >> 2) & 63; const s3 = (s >> 5) & 7; const l7 = adjustedPacked & 0x7F;
-      // colors.push(h6/63, s3/7, l7/127, 1.0);
       normals.push(0, 1, 0);
-      // singleTileDebug(x, z, h6, s3, l7, kDbg);
     }
   }
 
@@ -225,28 +372,35 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
   scene.metadata = scene.metadata || {};
   scene.metadata.mirrorWrapper = wrapper;
 
-  // Compute smooth normals over the shared grid (this follows RSÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ look for slopes)
+  // Compute smooth normals over the shared grid
   BABYLON.VertexData.ComputeNormals(positions, indices, normals);
   vd.normals = normals;
-
-  
-
   vd.applyToMesh(mesh);
 
   // Create material (shader path)
+  // --- Configure terrain material & shader uniforms ---
   const mat = new BABYLON.ShaderMaterial(
     "rsMat",
     scene,
     { vertex: "rs", fragment: "rs" },
     {
       attributes: ["position", "aK"],
-      uniforms: ["worldViewProjection", "world", "uGridSize", "uTileSize", "uAtlasDims", "uHD"],
-      samplers: ["uPalette", "uUnderlayTex", "uOverlayTex", "uMaskTex", "uOverlayAtlas", "uOverlayIndex"],
+      uniforms: ["worldViewProjection", "world", "uGridSize", "uTileSize", "uAtlasDims", "uAtlasDimsAnimated", "uHD"],
+      samplers: ["uPalette", "uUnderlayTex", "uOverlayTex", "uMaskTex", "uOverlayAtlas", "uOverlayAtlasAnimated", "uOverlayIndex"],
     }
   );
+  mat.markAsDirty(BABYLON.Material.TextureDirtyFlag)
   mat.setTexture("uPalette", paletteTex );
   scene.imageProcessingConfiguration.isEnabled = false;
   const engineRef = scene.getEngine();
+
+  /*
+   * 
+   * Build the custom shader material: bind the palette, keep uHD/atlas offsets up-to-date,
+   * upload per-vertex brightness (aK), and create the per-tile underlay/overlay/mask textures.
+   * 
+   */
+
   // HD toggle default
   if (typeof window.HD === 'undefined') window.HD = true;
   // Keep shader uniform in sync with window.HD
@@ -254,36 +408,11 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
     try {
       mat.setFloat('uHD', window.HD ? 1.0 : 0.0);
       mat.setMatrix('world', mesh.getWorldMatrix());
-      if (overlayScrollState && overlayScrollState.hasAnimatedSlots) {
-        const deltaMs = engineRef.getDeltaTime();
-        if (deltaMs > 0) {
-          const { slots } = overlayScrollState;
-          let dirty = false;
-          for (let i = 0; i < slots.length; i++) {
-            const slot = slots[i];
-            const base = slot * 2;
-            const sx = overlayScrollSpeeds[base];
-            const sy = overlayScrollSpeeds[base + 1];
-            if (sx === 0 && sy === 0) continue;
-            let ox = overlayScrollOffsets[base] + sx * deltaMs;
-            let oy = overlayScrollOffsets[base + 1] + sy * deltaMs;
-            ox = ox - Math.floor(ox);
-            oy = oy - Math.floor(oy);
-            if (ox !== overlayScrollOffsets[base] || oy !== overlayScrollOffsets[base + 1]) {
-              overlayScrollOffsets[base] = ox;
-              overlayScrollOffsets[base + 1] = oy;
-              dirty = true;
-            }
-          }
-          if (dirty) {
-            redrawAtlasWithOffsets(slots);
-          }
-        }
-      }
+      advanceOverlayScroll(engineRef.getDeltaTime());
     } catch(e) {}
   });
 
-  // Provide per-vertex brightness attribute aK to shader
+  // --- Upload per-vertex brightness attribute (aK) ---
   const kBuffer = new Float32Array(vertsPerSide * vertsPerSide);
   {
     let i = 0;
@@ -306,7 +435,8 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
     mesh.setVerticesData("aK", kBuffer, true, 1);
   }
 
-  // Build per-tile attribute textures for underlay/overlay HSL and mask
+  // --- Build per-tile underlay/overlay/mask textures ---
+
   const gridW = tileData[0].length | 0;
   const gridH = tileData.length | 0;
   const underData = new Uint8Array(gridW * gridH * 4);
@@ -346,7 +476,13 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
   mat.setVector2("uGridSize", new BABYLON.Vector2(gridW, gridH));
   mat.setFloat("uTileSize", tileSize);
 
-  // ---- Build overlay texture atlas and per-tile index texture ----
+  /*
+   * 
+   *  Start of texture logic for overlays
+   * 
+   */
+
+  // --- Build overlay texture atlas and per-tile index texture ---
   // Collect distinct textureIds actually used by present overlays
   const usedTexIdsSet = new Set();
   for (let z = 0; z < gridH; z++) {
@@ -361,15 +497,6 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
   }
 
   const texIds = Array.from(usedTexIdsSet.values()).sort((a, b) => a - b);
-  // Simple heuristic for atlas grid
-  const cellSize = 64; // px per tile in atlas
-  const texCount = texIds.length;
-  atlasSlotMeta = new Array(texCount);
-  const cols = Math.max(1, Math.ceil(Math.sqrt(Math.max(1, texCount))));
-  const rows = Math.max(1, Math.ceil(texCount / cols));
-  const atlasW = cols * cellSize;
-  const atlasH = rows * cellSize;
-  // Load images for each texture id (best effort)
   async function loadImage(src) {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -380,10 +507,6 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
     });
   }
 
-  // (Removed alpha-bleed pre-process; seams are handled in shader for full-tile overlays)
-
-  const texIndexById = new Map();
-  const isIntensityByIndex = new Map();
   const texMetaById = new Map();
   for (const id of texIds) {
     let isIntensity = (id > 51); // baseline rule
@@ -429,134 +552,77 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
     }
     texMetaById.set(id, { image: img, isIntensity, sample });
   }
+  const animatedTexIds = texIds.filter(id => overlayScrollPxPerTick.has(id));
 
-  const images = new Array(texCount);
-  texIds.forEach((id, index) => {
-    const meta = texMetaById.get(id) || { image: null, isIntensity: (id > 51), sample: null };
-    texIndexById.set(id, index);
-    images[index] = meta.image;
-    isIntensityByIndex.set(index, !!meta.isIntensity);
+  const staticAtlasInfo = buildOverlayAtlasTexture(texIds, texMetaById, 'overlayAtlas', {
+    previewElementId: 'overlay-atlas-preview',
+    logSummary: true,
   });
-  // Build atlas canvas
-  let atlasTex = null;
-  if (texCount > 0) {
-    const cvs = document.createElement('canvas');
-    cvs.width = atlasW; cvs.height = atlasH;
-    const ctx = cvs.getContext('2d');
-    ctx.clearRect(0,0,atlasW,atlasH);
-    for (let i = 0; i < images.length; i++) {
-      const img = images[i];
-      const cx = (i % cols) * cellSize;
-      const cy = Math.floor(i / cols) * cellSize;
-      if (img) {
-        // Draw image to full cell without gutters
-        ctx.drawImage(img, cx, cy, cellSize, cellSize);
-      } else {
-        // fallback: checkerboard for missing
-        ctx.fillStyle = '#ff00ff';
-        ctx.fillRect(cx, cy, cellSize, cellSize);
-      }
-      atlasSlotMeta[i] = {
-        image: img,
-        col: i % cols,
-        row: Math.floor(i / cols),
-      };
-    }
-    if (true) {
-      const summary = texIds.map((tid, index) => {
-        const meta = texMetaById.get(tid) || { sample: null };
-        return {
-          textureId: tid,
-          atlasIndex: index,
-          row: Math.floor(index / cols),
-          col: index % cols,
-          intensity: !!isIntensityByIndex.get(index),
-          sample: meta.sample || null,
-        };
-      });
-      console.table(summary);
+  const texIndexById = staticAtlasInfo ? staticAtlasInfo.indexById : new Map();
 
-      let imgEl = document.getElementById('overlay-atlas-preview');
-      if (!imgEl) {
-        imgEl = document.createElement('img');
-        imgEl.id = 'overlay-atlas-preview';
-        imgEl.style.position = 'fixed';
-        imgEl.style.bottom = '8px';
-        imgEl.style.right = '8px';
-        imgEl.style.border = '1px solid #ccc';
-        imgEl.style.maxWidth = '320px';
-        imgEl.style.maxHeight = '320px';
-        imgEl.style.background = '#111';
-        imgEl.style.zIndex = 9999;
-        document.body.appendChild(imgEl);
-      }
-      imgEl.src = cvs.toDataURL('image/png');
-      imgEl.title = `Atlas order: ${texIds.join(', ')}`;// This confirms that the atlas order shows the correct textures, misalligned textures are further downstream
-    }
-    atlasTex = new BABYLON.DynamicTexture('overlayAtlas', { width: atlasW, height: atlasH }, scene, false);
-    const dctx = atlasTex.getContext();
-    dctx.drawImage(cvs, 0, 0);
-    atlasTex.update();
-    atlasTex.hasAlpha = true;
-    if (typeof atlasTex.updateSamplingMode === 'function') {
-      atlasTex.updateSamplingMode(BABYLON.Texture.NEAREST_SAMPLINGMODE);
-    } else {
-      atlasTex.samplingMode = BABYLON.Texture.NEAREST_SAMPLINGMODE;
-    }
-    atlasTex.wrapU = atlasTex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
-    mat.setTexture('uOverlayAtlas', atlasTex);
-    atlasCanvas = cvs;
-    atlasCtx = ctx;
-    atlasTexCtx = dctx;
-    mat.setVector2('uAtlasDims', new BABYLON.Vector2(cols, rows));
 
-    overlayScrollOffsets.fill(0);
-    overlayScrollSpeeds.fill(0);
-    const animatedSlots = [];
-    texIds.forEach((tid, index) => {
-      if (index >= MAX_OVERLAY_SCROLL_SLOTS) return;
-      const def = overlayScrollPxPerTick.get(tid);
-      if (!def) return;
-      const speedPerMsX = (def.x || 0) / OVERLAY_SCROLL_TICK_MS;
-      const speedPerMsY = (def.y || 0) / OVERLAY_SCROLL_TICK_MS;
-      const normX = speedPerMsX / cellSize;
-      const normY = speedPerMsY / cellSize;
-      const base = index * 2;
-      overlayScrollSpeeds[base] = normX;
-      overlayScrollSpeeds[base + 1] = normY;
-      if (normX !== 0 || normY !== 0) {
-        animatedSlots.push(index);
-      }
+  
+  if (staticAtlasInfo) {
+    mat.setTexture('uOverlayAtlas', staticAtlasInfo.atlasTex);
+    mat.setVector2('uAtlasDims', new BABYLON.Vector2(staticAtlasInfo.cols, staticAtlasInfo.rows));
+    texIds.forEach((id, index) => {
+      console.log('tid', id, '→ slot', index);
     });
-    overlayScrollState = {
-      slots: animatedSlots,
-      hasAnimatedSlots: animatedSlots.length > 0,
-    };
-    if (overlayScrollState.hasAnimatedSlots) {
-      redrawAtlasWithOffsets(animatedSlots);
-    }
   } else {
-    // No overlays with textures
+    mat.setTexture('uOverlayAtlas', paletteTex);
     mat.setVector2('uAtlasDims', new BABYLON.Vector2(1, 1));
   }
+  const staticAtlasCols = staticAtlasInfo ? staticAtlasInfo.cols : 1;
+  const staticAtlasRows = staticAtlasInfo ? staticAtlasInfo.rows : 1;
 
-  // Per-tile overlay index texture (R=low byte of index+1, B=high byte, G=flags bit0=intensity, bit1=hiTex)
+  let animatedIndexById = new Map();
+  let animatedAtlasCols = 1;
+  let animatedAtlasRows = 1;
+  if (animatedTexIds.length > 0) {
+    const animatedAtlasInfo = buildOverlayAtlasTexture(animatedTexIds, texMetaById, 'overlayAtlasAnimated');
+    if (animatedAtlasInfo) {
+      animatedAtlasTex = animatedAtlasInfo.atlasTex;
+      animatedAtlasCtx = animatedAtlasInfo.ctx;
+      animatedAtlasTexCtx = animatedAtlasInfo.texCtx;
+      animatedAtlasSlotMeta = animatedAtlasInfo.slotMeta;
+      animatedIndexById = animatedAtlasInfo.indexById;
+      animatedAtlasCols = animatedAtlasInfo.cols;
+      animatedAtlasRows = animatedAtlasInfo.rows;
+      mat.setTexture('uOverlayAtlasAnimated', animatedAtlasTex);
+      mat.setVector2('uAtlasDimsAnimated', new BABYLON.Vector2(animatedAtlasInfo.cols, animatedAtlasInfo.rows));
+      initOverlayScrollState(animatedTexIds);
+      console.log("got to line 592", animatedTexIds, texMetaById);
+    }
+  }
+  if (!animatedAtlasTex) {
+    animatedAtlasCtx = null;
+    animatedAtlasTexCtx = null;
+    animatedAtlasSlotMeta = [];
+    animatedIndexById = new Map();
+    overlayScrollState = null;
+    mat.setTexture('uOverlayAtlasAnimated', staticAtlasInfo ? staticAtlasInfo.atlasTex : paletteTex);
+    mat.setVector2('uAtlasDimsAnimated', new BABYLON.Vector2(1, 1));
+  }
+  mat.markAsDirty(BABYLON.Material.TextureDirtyFlag)
+  // --- Encode per-tile atlas slot indices (uOverlayIndex texture) ---
   const idxData = new Uint8Array(gridW * gridH * 4);
+  // Loop 1 (debug logging)
   for (let z = 0; z < gridH; z++) {
     for (let x = 0; x < gridW; x++) {
       const O = overlaysEffective[tileData[z][x].overlayId | 0];
       if (!O) continue;
       const tid   = O.textureId | 0;
-      const texIdx = texIndexById.get(tid);
+      const useAnimated = animatedIndexById.has(tid);
+      const texIdx = useAnimated ? animatedIndexById.get(tid) : texIndexById.get(tid);
       if (texIdx === undefined) continue;
-      // atlas coords:
-      const cols = Math.max(1, Math.ceil(Math.sqrt(Math.max(1, texCount))));
-      const row = Math.floor(texIdx / cols);
-      const col = texIdx % cols;
-      if (typeof window !== "undefined" && window.DEBUG_ATLAS) { console.log(`tile ${z},${x} overlayId=${tileData[z][x].overlayId} textureId=${tid} texIdx=${texIdx} (row ${row}, col ${col})`); }
+      const colsForLog = useAnimated ? animatedAtlasCols : staticAtlasCols;
+      const row = Math.floor(texIdx / colsForLog);
+      const col = texIdx % colsForLog;
+      //console.log(`tile ${z},${x} overlayId=${tileData[z][x].overlayId} textureId=${tid} texIdx=${texIdx} (row ${row}, col ${col})${useAnimated ? ' [animated]' : ''}`);
     }
   }
 
+  // Loop 2
   for (let z = 0; z < gridH; z++) {
     for (let x = 0; x < gridW; x++) {
       const idx = (z * gridW + x) * 4;
@@ -566,20 +632,22 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
         const O = overlaysEffective[t.overlayId | 0];
         if (O) {
           const tid = (O.textureId | 0);
-          const texIdx = texIndexById.has(tid) ? (texIndexById.get(tid) | 0) : -1;
+          const useAnimated = animatedIndexById.has(tid);
+          const texIdx = useAnimated
+            ? (animatedIndexById.get(tid) !== undefined ? (animatedIndexById.get(tid) | 0) : -1)
+            : (texIndexById.get(tid) !== undefined ? (texIndexById.get(tid) | 0) : -1);
           if (texIdx >= 0) {
             const texIdxPlus = texIdx + 1;
             r = texIdxPlus & 255;
             b = (texIdxPlus >> 8) & 255;
             let flags = 0;
-            if (isIntensityByIndex.get(texIdx)) flags |= 1;
+            const meta = texMetaById.get(tid);
+            if (meta && meta.isIntensity) flags |= 1;
             if (tid > 50) flags |= 2;
+            if (useAnimated) flags |= 4;
             g = flags & 255;
             a = 255;
-            if (z === 24 && x === 24) {
-              console.log('tile', z, x, 'overlayId', t.overlayId, 
-                          'textureId', tid, 'atlasIndex', texIdx);
-            }
+            console.log(`tile ${z},${x} overlayId=${tileData[z][x].overlayId} tid=${tid} g=${g} slot=${texIdx}${useAnimated ? ' [animated]' : ''}`);
           }
         }
       }
@@ -589,23 +657,12 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
       idxData[idx+3] = a;
     }
   }
-  for(let i=0; i < 4; i++){
-  }
-  console.log(texIndexById);
   const overlayIndexTex = BABYLON.RawTexture.CreateRGBATexture(idxData, gridW, gridH, scene, false, false, BABYLON.Texture.NEAREST_SAMPLINGMODE);
   overlayIndexTex.wrapU = overlayIndexTex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
   mat.setTexture('uOverlayIndex', overlayIndexTex);
 
-  mesh.material = mat;
-
-  // Material: unlit so baked vertex colors = final look (no extra engine lighting)
-  /*const mat = new BABYLON.PBRMaterial("tileMat", scene);
-  mat.unlit = true;
-  mesh.material = mat;
-  mat.disableLighting = true;
-  mat.useVertexColor = true;*/
-
   // Frame the mesh
+  mesh.material = mat;
   const bi = mesh.getBoundingInfo();
   camera.setTarget(bi.boundingBox.centerWorld.clone());
   camera.radius = Math.max(camera.radius, bi.boundingSphere.radiusWorld * 1.5);
@@ -897,238 +954,5 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
   } catch (e) {
     console.warn('Failed to publish render context:', e);
   }
-
   return scene;
-}
-
-// Pack RS HSL to 15-bit
-function packRsHsl(h, s, l) {
-  const h6 = (h >> 2) & 0x3F;   // 6 bits
-  const s3 = (s >> 5) & 0x07;   // 3 bits
-  const l7 = (l >> 1) & 0x7F;   // 7 bits
-  return (h6 << 10) | (s3 << 7) | l7;
-}
-
-// Match reference method187: j' = clamp(2..126, j * (i&0x7F) / 128); return (i&0xFF80) | j'
-function applyRsBrightness(packedHsl, j /*0..255 brightness from slope*/ ) {
-  if (packedHsl === -1) return 0xBC614E; // client fallback color
-  let l = packedHsl & 0x7F;
-  let j2 = ((j * l) / 128) | 0;
-  if (j2 < 2) j2 = 2;
-  else if (j2 > 126) j2 = 126;
-  return (packedHsl & 0xFF80) | j2;
-}
-
-  // CPU-side corner coverage approximation for overlay masks.
-// Rotations: 0..3 clockwise; corners: 0=NW,1=NE,2=SW,3=SE in tile-local frame.
-  function coversCorner(shape, rot, corner) {
-  const rotCorner = ((corner & 3) - (rot & 3) + 4) & 3;
-  switch (shape | 0) {
-    case 0: return false; // transparent
-    case 1: return true;  // full tile
-    case 2: // big diagonal triangle (~50%): NW triangle
-      return rotCorner === 0; // only NW
-    case 3: // tall triangle (~25%) along left
-      return rotCorner === 0 || rotCorner === 2; // NW, SW
-    case 4: // mirror of 3 (right)
-      return rotCorner === 0 || rotCorner === 1; // NW, NE
-    case 5: // inverse of 3
-      return !(rotCorner === 0 || rotCorner === 2);
-    case 6: // inverse of 4
-      return !(rotCorner === 0 || rotCorner === 1);
-    case 7: // half-width rectangle (left)
-      return rotCorner === 0 || rotCorner === 2; // NW, SW
-    case 8: // small triangle (~12.5%)
-      return rotCorner === 0; // NW
-    case 9: // inverse of 8
-      return rotCorner !== 0;
-    case 10: // quarter circle inverse (approx): far corner only
-      return rotCorner === 3; // SE in canonical
-    case 11: // quarter circle (approx): the three near corners
-      return rotCorner === 0 || rotCorner === 1 || rotCorner === 2;
-    case 12: // thin trapezoid near right edge (per description)
-      return rotCorner === 1 || rotCorner === 3; // NE, SE
-    default:
-      return false;
-  }
-
-  // Expose current render context for debug helpers
-  try {
-    window._rsCtx = {
-      tileData,
-      overlayPresentGrid,
-      baseH_U, baseS_U, baseL_U,
-      baseH_O, baseS_O, baseL_O,
-      vertexBrightness,
-      tileSize
-    };
-  } catch {}
-
-  // Debug: dump shader-equivalent evaluation for a specific tile at its center
-  // Usage from console: window.dumpTileShaderEval(58, 34)
-  window.dumpTileShaderEval = function dumpTileShaderEval(tz, tx) {
-    try {
-      tz = tz|0; tx = tx|0;
-      if (tz < 0 || tz >= tileData.length || tx < 0 || tx >= tileData[0].length) {
-        console.warn('Tile out of range'); return;
-      }
-      const t = tileData[tz][tx];
-      const present = overlayPresentGrid[tz][tx];
-      const uH = baseH_U[tz][tx]|0, uS = baseS_U[tz][tx]|0, uL = baseL_U[tz][tx]|0;
-      const oH = baseH_O[tz][tx]|0, oS = baseS_O[tz][tx]|0, oL = baseL_O[tz][tx]|0;
-      const shape = (t.overlayShape|0), rot = (t.overlayRot|0)&3;
-      // shader UV at tile center (0.5,0.5), rotated
-      function rotateUV(uvx, uvy, r){
-        if (r===0) return [uvx, uvy];
-        if (r===1) return [1-uvy, uvx];
-        if (r===2) return [1-uvx, 1-uvy];
-        return [uvy, 1-uvx];
-      }
-      function maskCovers(maskId, uvx, uvy){
-        if (maskId===0) return false;
-        if (maskId===1) return true;
-        if (maskId===2) return (uvx+uvy) <= 1;
-        if (maskId===3) return (2*uvx+uvy) <= 1;
-        if (maskId===4) return (2*(1-uvx)+uvy) <= 1;
-        if (maskId===5) return !((2*uvx+uvy) <= 1);
-        if (maskId===6) return !((2*(1-uvx)+uvy) <= 1);
-        if (maskId===7) return uvx <= 0.5;
-        if (maskId===8) return (2*uvx+2*uvy) <= 1;
-        if (maskId===9) return !((2*uvx+2*uvy) <= 1);
-        if (maskId===10) { const dx=uvx-1, dy=uvy-1; return Math.hypot(dx,dy) > 1; }
-        if (maskId===11) { const dx=uvx, dy=uvy;     return Math.hypot(dx,dy) <= 1; }
-        if (maskId===12) return (uvx >= 0.8) && (uvy >= (1-uvx)) && (uvy <= uvx);
-        return false;
-      }
-      const uv = rotateUV(0.5, 0.5, rot);
-      const cover = present && maskCovers(shape, uv[0], uv[1]);
-      const H = cover ? oH : uH;
-      const S = cover ? oS : uS;
-      const L = cover ? oL : uL;
-      const H6 = (H>>2)&63, S3=(S>>5)&7, L7=(L>>1)&127;
-      // approximate center-of-tile brightness by averaging 4 node ks
-      const kNW = vertexBrightness[tz][tx]|0;
-      const kNE = vertexBrightness[tz][tx+1]|0;
-      const kSW = vertexBrightness[tz+1][tx]|0;
-      const kSE = vertexBrightness[tz+1][tx+1]|0;
-      let k = Math.round((kNW + kNE + kSW + kSE) / 4);
-      const kScale = (typeof window !== 'undefined' && typeof window.brightnessScale === 'number') ? window.brightnessScale : 1;
-      const kBias  = (typeof window !== 'undefined' && typeof window.brightnessBias  === 'number') ? window.brightnessBias  : 0;
-      k = Math.max(0, Math.min(255, Math.round(k * kScale + kBias)));
-      let j2 = Math.floor((k * L7) / 128);
-      if (j2 < 2) j2 = 2; else if (j2 > 126) j2 = 126;
-      const idx = H6*1024 + S3*128 + j2;
-      const entry = window.HslToRgb && window.HslToRgb[idx];
-      let hex;
-      if (typeof entry === 'number') {
-        const r=(entry>>>16)&255, g=(entry>>>8)&255, b=entry&255;
-        hex = '#'+r.toString(16).padStart(2,'0')+g.toString(16).padStart(2,'0')+b.toString(16).padStart(2,'0');
-      } else hex = entry;
-      console.groupCollapsed(`SHADER EVAL tile tz=${tz} tx=${tx} centerUV rot=${rot} cover=${cover}`);
-      console.groupEnd();
-    } catch(e) {
-      console.error('dumpTileShaderEval failed:', e);
-    }
-  };
-}
-
-// debugTileColor_WithClientPalette moved to debug.js (window.debugTileColor_WithClientPalette)
-
-function attenuateSatForLightness(s, l) {
-  let s2 = s|0;
-  if (l > 179) s2 >>= 1;
-  if (l > 192) s2 >>= 1;
-  if (l > 217) s2 >>= 1;
-  if (l > 243) s2 >>= 1;
-  return s2;
-}
-
-function buildBlendedBaseHsl(tileIdGrid /* grid[z][x] */, dataset /* underlays|overlays */) {
-  const h = tileIdGrid.length, w = tileIdGrid[0].length;
-  const baseH = Array.from({length: h}, () => new Array(w).fill(0));
-  const baseS = Array.from({length: h}, () => new Array(w).fill(0));
-  const baseL = Array.from({length: h}, () => new Array(w).fill(0));
-
-  const R = 2; // 5x5 window
-  for (let z = 0; z < h; z++) {
-    for (let x = 0; x < w; x++) {
-      let sumWH = 0, sumHM = 0, sumH = 0, sumS = 0, sumL = 0, cnt = 0;
-      for (let dz = -R; dz <= R; dz++) {
-        const zz = z + dz; if (zz < 0 || zz >= h) continue;
-        for (let dx = -R; dx <= R; dx++) {
-          const xx = x + dx; if (xx < 0 || xx >= w) continue;
-          const uId = tileIdGrid[zz][xx];
-          const U = dataset[uId];
-          if (!U) continue;
-          const hm = (U.hueMultiplier|0);
-          const hh = (U.hsl?.h|0);
-          // RS blends use (hue * hueMultiplier) / hueMultiplier
-          sumWH += (hh * hm);
-          sumHM += hm;
-          sumH  += hh;
-          sumS  += (U.hsl?.s|0);
-          sumL  += (U.hsl?.l|0);
-          cnt++;
-        }
-      }
-      let H = 0, S = 0, L = 0;
-      if (sumHM > 0) H = ((sumWH / sumHM) | 0) & 255;
-      else if (cnt > 0) H = ((sumH / cnt) | 0) & 255; // fallback when all hueMultipliers are 0
-      if (cnt > 0) {
-        S = (sumS / cnt) | 0;
-        L = (sumL / cnt) | 0;
-      }
-      S = attenuateSatForLightness(S, L);
-      baseH[z][x] = H; baseS[z][x] = S; baseL[z][x] = L;
-    }
-  }
-  return { baseH, baseS, baseL };
-}
-
-// Overlays path: build base HSL per tile with no 5x5 blending
-function buildPerTileBaseHsl(tileIdGrid /* grid[z][x] */, dataset /* overlays */) {
-  const h = tileIdGrid.length, w = tileIdGrid[0].length;
-  const baseH = Array.from({length: h}, () => new Array(w).fill(0));
-  const baseS = Array.from({length: h}, () => new Array(w).fill(0));
-  const baseL = Array.from({length: h}, () => new Array(w).fill(0));
-  for (let z = 0; z < h; z++) {
-    for (let x = 0; x < w; x++) {
-      const id = tileIdGrid[z][x] | 0;
-      const O = dataset[id];
-      if (id === -1 || !O) { baseH[z][x]=0; baseS[z][x]=0; baseL[z][x]=0; continue; }
-      let H = (O.hsl?.h|0) & 255;
-      let S = (O.hsl?.s|0) & 255;
-      let L = (O.hsl?.l|0) & 255;
-      S = attenuateSatForLightness(S, L);
-      baseH[z][x] = H; baseS[z][x] = S; baseL[z][x] = L;
-    }
-  }
-  return { baseH, baseS, baseL };
-}
-
-function nodeBaseHslOverlayAware(vz, vx, baseH_U, baseS_U, baseL_U, baseH_O, baseS_O, baseL_O, overlayPresentGrid, tileData) {
-  // Choose a single owning tile for this node (top-left of tile tz=vz, tx=vx) to match client behavior.
-  const h = baseH_U.length, w = baseH_U[0].length;
-  const tz = Math.min(Math.max(vz, 0), h - 1);
-  const tx = Math.min(Math.max(vx, 0), w - 1);
-
-  const ignoreOverlays = (typeof window !== 'undefined' && !!window.IGNORE_OVERLAYS);
-  if (!ignoreOverlays && tz >= 0 && tx >= 0 && tz < overlayPresentGrid.length && tx < overlayPresentGrid[0].length) {
-    if (overlayPresentGrid[tz][tx]) {
-      // Determine corner index of this node relative to owning tile
-      let corner = 0; // 0=NW,1=NE,2=SW,3=SE
-      if (vz === tz && vx === tx) corner = 0;
-      else if (vz === tz && vx === tx + 1) corner = 1;
-      else if (vz === tz + 1 && vx === tx) corner = 2;
-      else corner = 3;
-      const shape = (tileData[tz][tx].overlayShape | 0) || 0;
-      const rot = (tileData[tz][tx].overlayRot | 0) & 3;
-      if (coversCorner(shape, rot, corner)) {
-        return { h: baseH_O[tz][tx]|0, s: baseS_O[tz][tx]|0, l: baseL_O[tz][tx]|0 };
-      }
-    }
-  }
-
-  // Underlay per-tile HSL (already attenuated once when building baseS_U/baseL_U)
-  return { h: baseH_U[tz][tx]|0, s: baseS_U[tz][tx]|0, l: baseL_U[tz][tx]|0 };
 }
