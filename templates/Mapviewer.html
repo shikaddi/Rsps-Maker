@@ -1,0 +1,448 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>BabylonJS Tile Grid</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+</head>
+<body style="margin:0; overflow:hidden;">
+<canvas id="renderCanvas" style="width:100%; height:100%;"></canvas>
+<script>window.STATIC_BASE = "{{ url_for('static', filename='') }}";</script>
+<script src="{{ url_for('static', filename='javascript/UnderlaysData.js') }}"></script>
+<script src="{{ url_for('static', filename='javascript/Debug.js') }}"></script>
+<script src="{{ url_for('static', filename='javascript/GenerateScene.js') }}"></script>
+<script src="{{ url_for('static', filename='javascript/Dataparser.js') }}"></script>
+<script src="{{ url_for('static', filename='javascript/objects.js') }}"></script>
+<script src="{{ url_for('static', filename='javascript/Camera.js') }}"></script>
+<script src="{{ url_for('static', filename='javascript/Animation.js') }}"></script>
+<script>
+const canvas = document.getElementById("renderCanvas");
+const engine = new BABYLON.Engine(canvas, true);
+
+//const scene = generateScene(tileData); // your existing function
+//engine.runRenderLoop(() => scene.render());
+
+async function startSceneFromDoc(doc) {
+  // Allow reloading to pick up A134Grid changes: dispose previous scene and stop loop
+  try { if (window._currentScene) { window._currentScene.dispose(); } } catch {}
+  try { if (engine) { engine.stopRenderLoop(); } } catch {}
+  const { width, height, tileData, nodeHeights, vertexBrightness } = parseTileDataFromXml(doc, underlays);
+  gridSize = width;
+  BABYLON.Effect.ShadersStore["rsVertexShader"] = `
+precision highp float;
+attribute vec3 position;
+attribute float aK;           // per-vertex brightness (0..255)
+uniform mat4 worldViewProjection;
+varying vec3 vWorldPos;      // world space position (x,z) used to compute tileUV
+varying float vK;            // brightness 0..255
+void main(void) {
+  gl_Position = worldViewProjection * vec4(position, 1.0);
+  vWorldPos = position;
+  vK = aK;                   // pass through unnormalized
+}
+`;
+  console.log("got here");
+  BABYLON.Effect.ShadersStore["rsFragmentShader"] = `
+precision highp float;
+varying vec3 vWorldPos;
+varying float vK; // 0..255
+
+uniform sampler2D uPalette;      // 256x256 RGBA palette
+uniform sampler2D uUnderlayTex;  // gridW x gridH, RGB=H,S,L (0..255)
+uniform sampler2D uOverlayTex;   // gridW x gridH, RGB=H,S,L (0..255)
+uniform sampler2D uMaskTex;      // gridW x gridH, R=mask, G=rot, B=present (0/1)
+uniform vec2 uGridSize;          // (width,height) in tiles
+uniform float uTileSize;         // tile size in world units
+
+ // Overlay texture atlas (optional)
+uniform sampler2D uOverlayAtlas;   // atlas of overlay textures (colored or intensity)
+uniform sampler2D uOverlayIndex;   // gridW x gridH, R=low byte of index+1, B=high byte, G=flags (bit0=intensity, bit1=hiTex)
+uniform vec2 uAtlasDims;           // (cols, rows)
+uniform vec2 uAtlasSizePx;         // (atlasWidth, atlasHeight) in pixels
+uniform float uHD;                 // 1=HD textures on, 0=monocolor for tid>50
+
+// Rotate UV in 90ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â° steps around NW origin (0,0), y+ downward
+vec2 rotateUV(vec2 uv, int rot){
+  if (rot == 0) return uv;                              // 0ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
+  if (rot == 1) return vec2(uv.y, 1.0 - uv.x);          // +90ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â° CW
+  if (rot == 2) return vec2(1.0 - uv.x, 1.0 - uv.y);    // +180ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
+  /* rot == 3 */ return vec2(1.0 - uv.y, uv.x);         // +270ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â° CW
+}
+
+bool maskCovers(int maskId, vec2 uv) {
+  // canonical orientation; uv in [0,1]^2, origin at NW
+  if (maskId == 0) return false;        // transparent
+  if (maskId == 1) return true;         // full tile
+  if (maskId == 2) return (uv.x + uv.y) <= 1.0;                         // big triangle
+  if (maskId == 3) return (2.0*uv.x + uv.y) <= 1.0;                     // slim triangle left
+  if (maskId == 4) return (2.0*(1.0-uv.x) + uv.y) <= 1.0;               // slim triangle right
+  if (maskId == 5) return !((2.0*uv.x + uv.y) <= 1.0);                  // inverse of 3
+  if (maskId == 6) return !((2.0*(1.0-uv.x) + uv.y) <= 1.0);            // inverse of 4
+  if (maskId == 7) return uv.x <= 0.5;                                  // half-rect left
+  if (maskId == 8) return (2.0*uv.x + 2.0*uv.y) <= 1.0;                 // small triangle
+  if (maskId == 9) return !((2.0*uv.x + 2.0*uv.y) <= 1.0);              // inverse of 8
+  if (maskId == 10) {                                                   // quarter circle inverse
+    vec2 p = uv - vec2(1.0, 1.0);                                      // from SE corner
+    return length(p) > 1.0;
+  }
+  if (maskId == 11) {                                                   // quarter circle
+    vec2 p = uv;                                                        // from NW corner
+    return length(p) <= 1.0;
+  }
+  if (maskId == 12) {                                                   // thin trapezoid near right
+    // x in [0.8,1], between lines y >= 1-x and y <= x
+    return (uv.x >= 0.8) && (uv.y >= (1.0 - uv.x)) && (uv.y <= uv.x);
+  }
+  return false;
+}
+
+int rotationBias(int maskId){
+  // maskId: 1=full, 2..12=your shapes
+  // start with zeros; tweak specific ones if needed
+  if (maskId == 3)  return 1; // slim tri left: +90ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
+  if (maskId == 4)  return 1; // slim tri right: +90ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
+  if (maskId == 5)  return 1; // inverse of 3 typically same bias
+  if (maskId == 6)  return 1; // inverse of 4 typically same bias
+  if (maskId == 7)  return 1; // half-rect left looked like +90ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
+  if (maskId == 10) return 1; // quarter circle inverse: +90ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
+  if (maskId == 11) return 3; // quarter circle: +270ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
+  if (maskId == 12) return 2; // Trapezoid: +180ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
+  return 0; //2,8,9 (big triangle and small triangles)
+}
+
+void main(void) {
+  // Determine tile index and tile-local UV
+  vec2 worldXZ = vWorldPos.xz;
+  vec2 tileXY = floor(worldXZ / uTileSize);
+  tileXY = clamp(tileXY, vec2(0.0), uGridSize - vec2(1.0));
+  vec2 tileUV = fract(worldXZ / uTileSize);
+
+  // Sample per-tile attributes
+  vec2 tcoord = (tileXY + vec2(0.5)) / uGridSize;
+  vec3 HSL_U = texture2D(uUnderlayTex, tcoord).rgb * 255.0;
+  vec3 HSL_O = texture2D(uOverlayTex,  tcoord).rgb * 255.0;
+  vec3 MRB   = texture2D(uMaskTex,     tcoord).rgb * 255.0;
+  // If an overlay is present here and the rotated-UV is covered by mask, use Overlay texture/HSL; else Underlay HSL
+  int maskId = int(MRB.r + 0.5);
+  int rot    = int(MRB.g + 0.5);
+  bool present = (MRB.b > 0.5);
+  vec2 uvRot = rotateUV(tileUV, (rot + rotationBias(maskId)) % 4);
+  bool fullTile = (maskId == 1);
+  vec3 HSL = HSL_U;
+
+  // Precompute palette base colors for underlay/overlay HSL
+  // Underlay palette color
+  float H6_u = floor(HSL_U.r / 4.0);
+  float S3_u = floor(HSL_U.g / 32.0);
+  float L7_u = floor(HSL_U.b / 2.0);
+  float j_u  = clamp(vK, 0.0, 255.0);
+  float j2_u = floor((j_u * L7_u) / 128.0);
+  if (j2_u < 2.0) j2_u = 2.0; else if (j2_u > 126.0) j2_u = 126.0;
+  float idx_u = H6_u * 1024.0 + S3_u * 128.0 + j2_u;
+  float u_u = (mod(idx_u, 256.0) + 0.5) / 256.0;
+  float v_u = (floor(idx_u / 256.0) + 0.5) / 256.0;
+  vec3 baseUnderRgb = texture2D(uPalette, vec2(u_u, v_u)).rgb;
+
+  // Overlay palette color (for intensity maps)
+  float H6_o = floor(HSL_O.r / 4.0);
+  float S3_o = floor(HSL_O.g / 32.0);
+  float L7_o = floor(HSL_O.b / 2.0);
+  float j_o  = j_u; // same brightness term
+  float j2_o = floor((j_o * L7_o) / 128.0);
+  if (j2_o < 2.0) j2_o = 2.0; else if (j2_o > 126.0) j2_o = 126.0;
+  float idx_o = H6_o * 1024.0 + S3_o * 128.0 + j2_o;
+  float u_o = (mod(idx_o, 256.0) + 0.5) / 256.0;
+  float v_o = (floor(idx_o / 256.0) + 0.5) / 256.0;
+  vec3 baseOverlayRgb = texture2D(uPalette, vec2(u_o, v_o)).rgb;
+
+  // Overlay texture path
+  vec4 idxSample     = texture2D(uOverlayIndex, tcoord);
+  float texIndexLow  = floor(idxSample.r * 255.0 + 0.5);
+  float texIndexHigh = floor(idxSample.b * 255.0 + 0.5);
+  float texIndexPlus = texIndexLow + texIndexHigh * 256.0;
+  float texFlagsByte = floor(idxSample.g * 255.0 + 0.5);
+  bool hasTex = (texIndexPlus >= 1.0);
+  bool isIntensity = (mod(texFlagsByte, 2.0) >= 1.0);
+  bool hiTex = (mod(floor(texFlagsByte / 2.0), 2.0) >= 1.0);
+  bool hdEnabled = (uHD > 0.5);
+  bool debugTile = (int(tileXY.x + 0.5) == 24) && (int(tileXY.y + 0.5) == 24);
+
+  vec4 finalColor = vec4(baseUnderRgb, 1.0);
+  bool usedTexture = false;
+  if (present && maskCovers(maskId, uvRot) && hasTex && (hdEnabled || !hiTex)) {
+    float texIndex = texIndexPlus - 1.0;
+    float cols = uAtlasDims.x;
+    float rows = uAtlasDims.y;
+    float c = mod(texIndex, cols);
+    float r = floor(texIndex / cols);
+    vec2 cellSize = vec2(1.0/cols, 1.0/rows);
+    float invRow = rows - 1.0 - r;
+    vec2 atlasUV = vec2((c + uvRot.x) * cellSize.x,
+                        (invRow + uvRot.y) * cellSize.y);
+
+    vec4 sampleColor = texture2D(uOverlayAtlas, atlasUV);
+    if (isIntensity) {
+      float intensity = sampleColor.r; // grayscale 0..1
+      finalColor = vec4(baseOverlayRgb * intensity, 1.0);
+    } else {
+      if (fullTile) {
+        // Full-tile colored overlay: treat as opaque replacement (ignore alpha)
+        finalColor = vec4(sampleColor.rgb, 1.0);
+      } else {
+        // Alpha blend colored texture over the underlay palette color
+        vec3 over = sampleColor.rgb;
+        float a = clamp(sampleColor.a, 0.0, 1.0);
+        vec3 blended = mix(baseUnderRgb, over, a);
+        finalColor = vec4(blended, 1.0);
+      }
+    }
+    usedTexture = true;
+  }
+
+  // If no texture used, fall back to palette path using chosen HSL (overlay or underlay)
+  if (!usedTexture) {
+    if (present && maskCovers(maskId, uvRot)) {
+      // No texture: use overlay palette color; else underlay already in finalColor
+      finalColor = vec4(baseOverlayRgb, 1.0);
+    }
+  }
+
+  gl_FragColor = finalColor;
+}
+`;
+  // Colors are computed inside generateScene from tile underlay ids.
+  const scene = await generateScene(tileData, nodeHeights, vertexBrightness);
+
+  const dirLight = new BABYLON.DirectionalLight(
+    "rsSun",
+    new BABYLON.Vector3(-0.5, -1.0, -0.3),
+    scene
+  );
+  dirLight.intensity = 0.75;
+
+  const hemiLight = new BABYLON.HemisphericLight(
+    "rsSky",
+    new BABYLON.Vector3(0, 1, 0),
+    scene
+  );
+  hemiLight.diffuse = new BABYLON.Color3(0.45, 0.45, 0.45);
+  hemiLight.specular = BABYLON.Color3.Black();
+  hemiLight.groundColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+  const mesh = scene.meshes.find(m => m.name.includes('2725'));
+  const tileSize = 1; // or read from your material uniform if you prefer
+  const camera = setupClampedArcCam(scene, width, height, tileSize, canvas);
+  
+  console.log("arrow controls installed on", camera.name, "scene id", scene.uid);
+  const edgePan = enableEdgePanning(camera, scene, engine.getRenderingCanvas(), width, height, 1, {
+    edgePx: 24,
+    topUiReservePx: 56,
+    requireModifier: null,        // set "Space" later if you add a toolbar
+    requireMouseButton: null,     // or 2 for RMB-only edge pan
+    isOverUI: (x, y) => false     // plug your UI hit-test here
+  });
+  // Set up ArcRotateCamera mouse controls
+  const ptr = camera.inputs.attached.pointers;
+  ptr.buttons = [1];               // Middle button = rotate only
+  ptr.panningMouseButton = -1;     // disable built-in panning; custom right-button pan below
+  ptr.useCtrlForPanning = false;   // Ctrl+Left does nothing now
+  ptr.angularSensibilityX = 1500;  // tune as needed
+  ptr.angularSensibilityY = 1500;
+  camera.panningSensibility = 1e9; // effectively disable built-in pan
+  // Uniform-feel pointer panning (middle mouse)
+  const pointerPan = enablePointerPan(camera, scene, engine.getRenderingCanvas(), width, height, 1, {
+    basePxSpeed: 900,
+    shiftBoost: 2.0,
+    isOverUI: (x,y) => false
+  });
+  enableArrowControls(camera, scene, canvas, width, height, 1, {
+    // tweak if you want different feel:
+    panStepBase: 0.005,
+    rotStepBase: 0.02,
+    shiftBoost:  2.0,
+    lockFBWhileRotating: false  // set to true if you want NO panning at all while rotating
+  });
+  engine.runRenderLoop(() => scene.render());
+  window.addEventListener('resize', () => engine.resize());
+  const kFlat = 93; // expected from slope math on flat ground
+  console.log('Client-expected hex (flat):', debugTileColor_WithClientPalette(61, kFlat));
+  
+  // After landscape loads, fetch and parse objects.jsON (e.g., 651.json)
+  try {
+    const objects = await loadAndParseObjectsJson('651.json');
+    // Stash for future rendering steps
+    scene.metadata = scene.metadata || {};
+    scene.metadata.objects = objects;
+    window._RS_OBJECTS = objects; // handy global for debugging/future use
+    console.log(`Loaded ${objects.length} objects from 651.json`, objects.slice(0, 5));
+    // Next: send first object to backend to generate GLTF, then render it above map center
+    if (objects.length > 0) {
+      try {
+        await renderObjectsFromBackend(scene, objects, {
+          gridW: width,
+          gridH: height,
+          tileSize,
+          nodeHeights
+        });
+      } catch (e) {
+        console.warn('Rendering first object failed:', e);
+      }
+    }
+  } catch (e) {
+    console.warn('Object JSON load/parse failed, offering file picker:', e);
+    try {
+      const objects = await promptPickObjectsJson();
+      scene.metadata = scene.metadata || {};
+      scene.metadata.objects = objects;
+      window._RS_OBJECTS = objects;
+      console.log(`Loaded ${objects.length} objects from picked JSON`);
+
+      if (objects.length > 0) {
+        try {
+          await renderObjectsFromBackend(scene, objects, {
+            gridW: width,
+            gridH: height,
+            tileSize,
+            nodeHeights
+          });
+        } catch (e2) {
+          console.warn('Rendering first object failed (picked):', e2);
+        }
+      }
+    } catch (e2) {
+      console.warn('No objects.jsON loaded:', e2);
+    }
+  }
+}
+
+function setupClampedArcCam(scene, gridW, gridH, tileSize = 1, canvas) {
+  // Dispose any existing cameras so Babylon won't use a default one
+  if (scene.cameras) {
+    for (const c of scene.cameras) c.dispose();
+    scene.cameras.length = 0;
+  }
+
+  const cx = (gridW * tileSize) * 0.5;
+  const cz = (gridH * tileSize) * 0.5;
+  const cy = 0.0;
+  const wrapper = scene.metadata && scene.metadata.mirrorWrapper || null;
+  const target = wrapper
+    ? new BABYLON.Vector3(
+        wrapper.position.x + cx * (wrapper.scaling ? wrapper.scaling.x : 1),
+        wrapper.position.y + cy * (wrapper.scaling ? wrapper.scaling.y : 1),
+        wrapper.position.z + cz * (wrapper.scaling ? wrapper.scaling.z : 1)
+      )
+    : new BABYLON.Vector3(cx, cy, cz);
+  const mapSpan = Math.max(gridW, gridH) * tileSize;
+  const startRadius = mapSpan * 1.2;
+
+  const cam = new BABYLON.ArcRotateCamera(
+    "arcCam",
+    -Math.PI / 4,          // alpha
+    Math.PI / 3,           // beta (0=top-down, ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬/2=horizon)
+    startRadius,           // radius
+    target,
+    scene
+  );
+
+  // Clamp rotation (prevents going under the map and from going perfectly top-down)
+  const EPS = 0.34;        // ~20ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
+  cam.lowerBetaLimit = EPS;                 // donÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢t go perfectly vertical above
+  cam.upperBetaLimit = Math.PI / 2 - EPS;   // keep above horizon
+
+  // Clamp zoom
+  cam.lowerRadiusLimit = Math.max(tileSize * 8, mapSpan * 0.1);
+  cam.upperRadiusLimit = mapSpan * 4;
+
+  // Nice controls
+  cam.wheelPrecision = 5;          // slower zoom
+  cam.panningSensibility = 0;       // disable panning for now
+  cam.inertia = 0.8;
+  cam.useBouncingBehavior = true;
+  cam.allowUpsideDown = false;      // belt-and-suspenders
+
+  // Make it the active camera and attach to canvas
+  scene.activeCamera = cam;
+  cam.attachControl(canvas, true);
+
+  // (Optional) light if you donÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢t already add one in generateScene
+  if (!scene.lights || scene.lights.length === 0) {
+    new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0.3, 1.0, 0.25), scene);
+  }
+
+  return cam;
+}
+
+// Load ExampleMap.xml with file-picker
+(async function loadHeightMapAndStart() {
+    const wrapper = document.createElement('div');
+    wrapper.style.position = 'absolute';
+    wrapper.style.top = '10px';
+    wrapper.style.left = '10px';
+    wrapper.style.padding = '8px 12px';
+    wrapper.style.background = 'rgba(0,0,0,0.6)';
+    wrapper.style.color = 'white';
+    wrapper.style.borderRadius = '6px';
+    wrapper.style.zIndex = '1000';
+    wrapper.textContent = 'Select ExampleMap.xml to load heights:';
+
+  const inputXml = document.createElement('input');
+  inputXml.type = 'file';
+  inputXml.accept = '.xml,application/xml,text/xml, .tmx';
+  inputXml.style.marginLeft = '10px';
+  inputXml.addEventListener('change', async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      const doc = new DOMParser().parseFromString(text, 'application/xml');
+      window.LAST_XML_DOC = doc;
+      wrapper.remove();
+      startSceneFromDoc(doc);
+    });
+
+  wrapper.appendChild(inputXml);
+  const labelXml = document.createElement('span');
+  labelXml.textContent = ' (XML)';
+  wrapper.appendChild(labelXml);
+    document.body.appendChild(wrapper);
+
+  })();
+
+  // Global key toggle for HD textures (H)
+  if (typeof window.HD === 'undefined') window.HD = true;
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key === 'h' || ev.key === 'H') {
+      window.HD = !window.HD;
+      console.log('HD textures:', window.HD ? 'ON' : 'OFF');
+    }
+  });
+</script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
