@@ -33,6 +33,68 @@ async function loadAndParseObjectsJson(path = '651.json') {
 
 // Set to a type number to render only matching objects (e.g., 3 for square corners).
 const DEBUG_OBJECT_TYPE = null;
+const gltfExtrasCache = new Map();
+
+async function ensureGltfExtras(filename) {
+  if (!filename) return null;
+  if (gltfExtrasCache.has(filename)) {
+    return gltfExtrasCache.get(filename);
+  }
+  try {
+    const resp = await fetch(`/static/objects/${filename}`, { cache: 'force-cache' });
+    if (!resp.ok) {
+      gltfExtrasCache.set(filename, null);
+      return null;
+    }
+    const json = await resp.json();
+    const meshExtras = (json.meshes || []).map((mesh) => {
+      const prims = mesh.primitives || [];
+      return {
+        meshExtras: mesh.extras || null,
+        primitiveExtras: prims.map((prim) => prim?.extras || null),
+      };
+    });
+    gltfExtrasCache.set(filename, meshExtras);
+    return meshExtras;
+  } catch (err) {
+    console.warn('Failed to fetch glTF extras for', filename, err);
+    gltfExtrasCache.set(filename, null);
+    return null;
+  }
+}
+
+function parseModelInfoFromPath(gltfPath) {
+  if (!gltfPath || typeof gltfPath !== 'string') return null;
+  const name = gltfPath.split(/[\\/]/).pop() || '';
+  const match = name.match(/object_(\d+)_type_(\d+)_model_(\d+)\.gltf$/i);
+  if (!match) return null;
+  return {
+    objectId: Number(match[1]) | 0,
+    modelType: Number(match[2]) | 0,
+    modelId: Number(match[3]) | 0,
+  };
+}
+
+function buildAnimationOptions(entry) {
+  const opts = {};
+  const parsed = parseModelInfoFromPath(entry?.gltf);
+  if (parsed) {
+    opts.objectId = parsed.objectId;
+    opts.modelType = parsed.modelType;
+    opts.modelId = parsed.modelId;
+    return opts;
+  }
+  const objectId = Number(entry?.object_id ?? entry?.objectId);
+  if (Number.isFinite(objectId)) opts.objectId = objectId | 0;
+  const modelType = Number(entry?.model_type ?? entry?.modelType);
+  if (Number.isFinite(modelType)) opts.modelType = modelType | 0;
+  const usedModels = entry?.used_model_ids;
+  if (Array.isArray(usedModels) && usedModels.length) {
+    const modelId = Number(usedModels[0]);
+    if (Number.isFinite(modelId)) opts.modelId = modelId | 0;
+  }
+  return opts;
+}
 
 // Normalize entries to a consistent structure for later rendering
 function normalizeObjectEntries(arr) {
@@ -224,6 +286,32 @@ async function renderObjectsFromBackend(scene, objects, ctx) {
   }
 
   const uniqueEntries = Array.isArray(resultJson?.objects) ? resultJson.objects : [];
+
+  for (const entry of uniqueEntries) {
+    const entryDefinition = entry?.objectdef || entry?.objectDef;
+    const animId = Number(entryDefinition?.animationID);
+    if (
+      Number.isFinite(animId) &&
+      animId >= 0 &&
+      typeof AnimationStore?.prepareAnimation === 'function'
+    ) {
+      try {
+        const animOptions = buildAnimationOptions(entry);
+        const animData = await AnimationStore.prepareAnimation(animId, animOptions);
+        console.log(
+          `Animation ${animId} JSON ready (backend response phase). frameCount=`,
+          animData?.frameCount
+        );
+        scene.metadata = scene.metadata || {};
+        scene.metadata.animations = scene.metadata.animations || new Map();
+        const key = JSON.stringify({ animId, ...animOptions });
+        scene.metadata.animations.set(key, animData);
+      } catch (animErr) {
+        console.warn(`Failed to prepare animation ${animId}:`, animErr);
+      }
+    }
+  }
+
   const renderPromises = uniqueEntries.map(async (entry) => {
     if (!entry || entry.gltf === 'no model' || !entry.gltf) return [];
     const id = Number(entry.object_id ?? entry.objectId);
@@ -240,8 +328,33 @@ async function renderObjectsFromBackend(scene, objects, ctx) {
       const gltfUrl = (typeof staticUrl === 'function')
         ? staticUrl('objects/' + gltfFilename)
         : '/static/objects/' + gltfFilename;
+      const meshExtras = await ensureGltfExtras(gltfFilename);
       try {
         container = await BABYLON.SceneLoader.LoadAssetContainerAsync('', gltfUrl, scene);
+        if (meshExtras && Array.isArray(meshExtras)) {
+          container.meshes.forEach((mesh, idx) => {
+            const extrasEntry = meshExtras[idx];
+            if (!extrasEntry) return;
+            const primitiveExtras = extrasEntry.primitiveExtras || [];
+            const meshLevelExtras = extrasEntry.meshExtras || null;
+            const firstPrimExtras = primitiveExtras.find((prim) => prim && prim.rs_to_gltf);
+            mesh.metadata = mesh.metadata || {};
+            mesh.metadata.gltf = mesh.metadata.gltf || {};
+            const targetExtras = mesh.metadata.gltf.extras = mesh.metadata.gltf.extras || {};
+            if (firstPrimExtras && firstPrimExtras.rs_to_gltf) {
+              targetExtras.rs_to_gltf = firstPrimExtras.rs_to_gltf;
+              if (mesh.geometry) {
+                mesh.geometry.metadata = mesh.geometry.metadata || {};
+                mesh.geometry.metadata.rs_to_gltf = firstPrimExtras.rs_to_gltf;
+              }
+            }
+            if (meshLevelExtras && typeof meshLevelExtras === 'object') {
+              Object.keys(meshLevelExtras).forEach((key) => {
+                targetExtras[key] = meshLevelExtras[key];
+              });
+            }
+          });
+        }
         cache.containers.set(key, container);
       } catch (loadErr) {
         console.warn('Failed to load GLTF asset', gltfUrl, loadErr);
@@ -293,6 +406,15 @@ function instantiateSingleRoot(container, scene, entry, index, suffix = '') {
       console.warn('instantiateSingleRoot: no root nodes for', entry);
       return null;
     }
+    const meshes = [];
+    if (root instanceof BABYLON.Mesh) {
+      meshes.push(root);
+    }
+    if (typeof root.getChildMeshes === 'function') {
+      root.getChildMeshes(true).forEach((mesh) => meshes.push(mesh));
+    }
+    meshes.forEach((mesh) => copyGltfMetadataFromSource(mesh));
+
     (inst?.animationGroups || []).forEach((group) => {
       try { group.stop(); } catch (_) {}
     });
@@ -385,6 +507,19 @@ async function instantiateObjectInstances(scene, entry, occurrences, ctx, contai
       return;
     }
 
+    const meshesForUpdate = [];
+    if (root instanceof BABYLON.Mesh) {
+      meshesForUpdate.push(root);
+    }
+    if (typeof root.getChildMeshes === 'function') {
+      const childMeshes = root.getChildMeshes(true);
+      childMeshes.forEach((mesh) => meshesForUpdate.push(mesh));
+    }
+    meshesForUpdate.forEach((mesh) => {
+      copyGltfMetadataFromSource(mesh);
+      makeMeshGeometryUpdatable(mesh);
+    });
+
     const isType2 = (Number(occurrence.type) | 0) === 2;
     let type2Clone = null;
 
@@ -398,6 +533,26 @@ async function instantiateObjectInstances(scene, entry, occurrences, ctx, contai
       ctx,
     );
     toggleDebugBoundingBox(root, primaryObj);
+
+    const animId =
+      Number(
+        enrichedOccurrence?.definition?.animationID ??
+          entryDefinition?.animationID ??
+          -1
+      ) | 0;
+    if (
+      Number.isFinite(animId) &&
+      animId >= 0 &&
+      typeof AnimationStore?.bindAnimationToNode === 'function'
+    ) {
+      const animOptions = {
+        scaleDivisor: 1,
+        ...buildAnimationOptions(entry),
+      };
+      AnimationStore.bindAnimationToNode(root, animId, animOptions).catch((err) => {
+        console.warn(`Failed to bind animation ${animId} to object ${entry.object_id}:`, err);
+      });
+    }
 
     roots.push(root);
     record.roots.add(root);
@@ -442,7 +597,7 @@ async function instantiateObjectInstances(scene, entry, occurrences, ctx, contai
       } catch (_) {}
     });
   });
-
+  roots.getChildMeshes().map(m => m.name)
   return roots;
 }
 
@@ -765,7 +920,15 @@ function placeObjectInstance(root, obj, footprint, ctx) {
     plane: Number.isFinite(Number(obj?.plane)) ? (Number(obj.plane) | 0) : 0,
     isSecondary: !!obj?.__type2Secondary,
   });
-
+  const meshesToBake = root.getChildMeshes ? root.getChildMeshes(true) : [];
+  meshesToBake.forEach((child) => {
+    if (typeof child.bakeCurrentTransforms === 'function') {
+      child.bakeCurrentTransforms(true);
+      child.position.set(0, 0, 0);
+      child.rotation.set(0, 0, 0);
+      child.scaling.set(1, 1, 1);
+    }
+  });
   root.metadata = {
     ...previousMeta,
     worldPosition: { x: root.position.x, y: root.position.y, z: root.position.z },
@@ -1048,7 +1211,6 @@ function computeWallDecorationPlacement(obj, tileSize, forceThin = false) {
     const translations = FORCED_TYPE_TRANSLATIONS.get(forcedKey);
     offsetX += translations[0];
     offsetZ += translations[1];
-    console.log(obj.id,offsetX, offsetZ)
     if(translations.length === 3){
       offsetY += translations[2];
     }
@@ -1214,7 +1376,7 @@ const FORCED_TYPE_TRANSLATIONS = new Map([
   // key: `${type}-${id}` -> x and z translations
   //["4-6963",[0,0.1]],
   //["4-6964",[0,0.1]],
-  ["10-2725",[-0.5,-0.5]],
+  ["10-2725",[-0.5,-0.475]],
   ["10-836",[0.5,0.5,1]],
   ["10-610",[0.5,0.5]],
   ["10-595",[-0.5,-0.5]],
@@ -1237,3 +1399,90 @@ const FORCED_TYPE_ROTATIONS = new Map([
 
 
 
+function makeMeshGeometryUpdatable(mesh) {
+  if (!mesh || typeof mesh.getVertexBuffer !== 'function') return;
+  if (typeof mesh.makeGeometryUnique === 'function') {
+    try {
+      mesh.makeGeometryUnique();
+    } catch (_) {}
+  }
+  const kinds = [
+    BABYLON.VertexBuffer.PositionKind,
+    BABYLON.VertexBuffer.NormalKind,
+    BABYLON.VertexBuffer.ColorKind,
+    BABYLON.VertexBuffer.UVKind,
+  ];
+  kinds.forEach((kind) => {
+    if (!mesh.isVerticesDataPresent || !mesh.isVerticesDataPresent(kind)) return;
+    const vb = mesh.getVertexBuffer(kind);
+    if (vb && !vb.isUpdatable()) {
+      const data = mesh.getVerticesData(kind, true, true);
+      if (data) {
+        mesh.updateVerticesData(kind, data, true, true);
+      }
+    }
+  });
+}
+
+function cloneMetadata(meta) {
+  if (!meta) return null;
+  try {
+    return JSON.parse(JSON.stringify(meta));
+  } catch {
+    return meta;
+  }
+}
+
+const loggedMissingMetadata = new WeakSet();
+
+function copyGltfMetadataFromSource(mesh) {
+  if (!mesh) return;
+  const already = mesh.metadata && mesh.metadata.gltf && mesh.metadata.gltf.extras;
+  const geoAlready = mesh.geometry && mesh.geometry.metadata && mesh.geometry.metadata.rs_to_gltf;
+  if (already && already.rs_to_gltf && geoAlready) return;
+
+  const source =
+    mesh._source ||
+    mesh._sourceMesh ||
+    mesh.source ||
+    mesh.sourceMesh ||
+    (mesh._original && mesh._original.source);
+
+  let sourceExtras =
+    source &&
+    source.metadata &&
+    source.metadata.gltf &&
+    source.metadata.gltf.extras;
+
+  if ((!sourceExtras || !sourceExtras.rs_to_gltf) && mesh.parent) {
+    const parentExtras =
+      mesh.parent.metadata &&
+      mesh.parent.metadata.gltf &&
+      mesh.parent.metadata.gltf.extras;
+    if (parentExtras && parentExtras.rs_to_gltf) {
+      sourceExtras = parentExtras;
+    }
+  }
+
+  if (!sourceExtras || !sourceExtras.rs_to_gltf) {
+    if (source && source.metadata && !loggedMissingMetadata.has(source)) {
+      console.warn(
+        '[AnimationStore] Missing rs_to_gltf extras on source mesh',
+        source.name || source.id,
+        source.metadata,
+      );
+      loggedMissingMetadata.add(source);
+    }
+    return;
+  }
+
+  const clonedExtras = cloneMetadata(sourceExtras);
+  mesh.metadata = mesh.metadata || {};
+  mesh.metadata.gltf = mesh.metadata.gltf || {};
+  mesh.metadata.gltf.extras = clonedExtras;
+
+  if (mesh.geometry) {
+    mesh.geometry.metadata = mesh.geometry.metadata || {};
+    mesh.geometry.metadata.rs_to_gltf = cloneMetadata(sourceExtras.rs_to_gltf);
+  }
+}

@@ -45,6 +45,64 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
     return { h: (H6 << 2), s: (S3 << 5), l: (L7 << 1) };
   }
 
+  const overlayScrollPxPerTick = new Map([
+    [1,  { x: 1, y: 0 }],
+    [17, { x: 1, y: 0 }],
+    [24, { x: 1, y: 0 }],
+    [31, { x: 1, y: 0 }],
+    [40, { x: 1, y: 0 }],
+  ]);
+  const OVERLAY_SCROLL_TICK_MS = 20;
+  const MAX_OVERLAY_SCROLL_SLOTS = 128;
+  const overlayScrollOffsets = new Float32Array(MAX_OVERLAY_SCROLL_SLOTS * 2);
+  const overlayScrollSpeeds = new Float32Array(MAX_OVERLAY_SCROLL_SLOTS * 2);
+  let overlayScrollState = null;
+  const slotScratchCanvas = new Map();
+  let atlasCanvas = null;
+  let atlasCtx = null;
+  let atlasTexCtx = null;
+  let atlasSlotMeta = [];
+
+  function redrawAtlasWithOffsets(slotList) {
+    if (!atlasTex || !atlasCtx || !atlasTexCtx) return;
+    let updated = false;
+    for (let i = 0; i < slotList.length; i++) {
+      const slot = slotList[i];
+      if (slot < 0 || slot >= atlasSlotMeta.length) continue;
+      const meta = atlasSlotMeta[slot];
+      if (!meta || !meta.image) continue;
+      const base = slot * 2;
+      const fracX = ((overlayScrollOffsets[base] % 1) + 1) % 1;
+      const fracY = ((overlayScrollOffsets[base + 1] % 1) + 1) % 1;
+      const offsetPxX = fracX * cellSize;
+      const offsetPxY = fracY * cellSize;
+      let scratch = slotScratchCanvas.get(slot);
+      if (!scratch) {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = cellSize;
+        slotScratchCanvas.set(slot, { canvas, ctx: canvas.getContext('2d') });
+        scratch = slotScratchCanvas.get(slot);
+      }
+      const { canvas, ctx } = scratch;
+      ctx.clearRect(0, 0, cellSize, cellSize);
+      for (let dx = -cellSize; dx <= cellSize; dx += cellSize) {
+        for (let dy = -cellSize; dy <= cellSize; dy += cellSize) {
+          ctx.drawImage(meta.image, dx - offsetPxX, dy - offsetPxY, cellSize, cellSize);
+        }
+      }
+      const destX = meta.col * cellSize;
+      const destY = meta.row * cellSize;
+      atlasCtx.clearRect(destX, destY, cellSize, cellSize);
+      atlasCtx.drawImage(canvas, destX, destY);
+      atlasTexCtx.clearRect(destX, destY, cellSize, cellSize);
+      atlasTexCtx.drawImage(canvas, destX, destY);
+      updated = true;
+    }
+    if (updated) {
+      atlasTex.update(true);
+    }
+  }
+
   const overlaysEffective = overlays.map((O) => {
     if (!O || typeof O !== 'object') return O;
     const texId = O.textureId | 0;
@@ -188,6 +246,7 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
   );
   mat.setTexture("uPalette", paletteTex );
   scene.imageProcessingConfiguration.isEnabled = false;
+  const engineRef = scene.getEngine();
   // HD toggle default
   if (typeof window.HD === 'undefined') window.HD = true;
   // Keep shader uniform in sync with window.HD
@@ -195,6 +254,32 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
     try {
       mat.setFloat('uHD', window.HD ? 1.0 : 0.0);
       mat.setMatrix('world', mesh.getWorldMatrix());
+      if (overlayScrollState && overlayScrollState.hasAnimatedSlots) {
+        const deltaMs = engineRef.getDeltaTime();
+        if (deltaMs > 0) {
+          const { slots } = overlayScrollState;
+          let dirty = false;
+          for (let i = 0; i < slots.length; i++) {
+            const slot = slots[i];
+            const base = slot * 2;
+            const sx = overlayScrollSpeeds[base];
+            const sy = overlayScrollSpeeds[base + 1];
+            if (sx === 0 && sy === 0) continue;
+            let ox = overlayScrollOffsets[base] + sx * deltaMs;
+            let oy = overlayScrollOffsets[base + 1] + sy * deltaMs;
+            ox = ox - Math.floor(ox);
+            oy = oy - Math.floor(oy);
+            if (ox !== overlayScrollOffsets[base] || oy !== overlayScrollOffsets[base + 1]) {
+              overlayScrollOffsets[base] = ox;
+              overlayScrollOffsets[base + 1] = oy;
+              dirty = true;
+            }
+          }
+          if (dirty) {
+            redrawAtlasWithOffsets(slots);
+          }
+        }
+      }
     } catch(e) {}
   });
 
@@ -279,6 +364,7 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
   // Simple heuristic for atlas grid
   const cellSize = 64; // px per tile in atlas
   const texCount = texIds.length;
+  atlasSlotMeta = new Array(texCount);
   const cols = Math.max(1, Math.ceil(Math.sqrt(Math.max(1, texCount))));
   const rows = Math.max(1, Math.ceil(texCount / cols));
   const atlasW = cols * cellSize;
@@ -370,6 +456,11 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
         ctx.fillStyle = '#ff00ff';
         ctx.fillRect(cx, cy, cellSize, cellSize);
       }
+      atlasSlotMeta[i] = {
+        image: img,
+        col: i % cols,
+        row: Math.floor(i / cols),
+      };
     }
     if (true) {
       const summary = texIds.map((tid, index) => {
@@ -414,7 +505,36 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
     }
     atlasTex.wrapU = atlasTex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
     mat.setTexture('uOverlayAtlas', atlasTex);
+    atlasCanvas = cvs;
+    atlasCtx = ctx;
+    atlasTexCtx = dctx;
     mat.setVector2('uAtlasDims', new BABYLON.Vector2(cols, rows));
+
+    overlayScrollOffsets.fill(0);
+    overlayScrollSpeeds.fill(0);
+    const animatedSlots = [];
+    texIds.forEach((tid, index) => {
+      if (index >= MAX_OVERLAY_SCROLL_SLOTS) return;
+      const def = overlayScrollPxPerTick.get(tid);
+      if (!def) return;
+      const speedPerMsX = (def.x || 0) / OVERLAY_SCROLL_TICK_MS;
+      const speedPerMsY = (def.y || 0) / OVERLAY_SCROLL_TICK_MS;
+      const normX = speedPerMsX / cellSize;
+      const normY = speedPerMsY / cellSize;
+      const base = index * 2;
+      overlayScrollSpeeds[base] = normX;
+      overlayScrollSpeeds[base + 1] = normY;
+      if (normX !== 0 || normY !== 0) {
+        animatedSlots.push(index);
+      }
+    });
+    overlayScrollState = {
+      slots: animatedSlots,
+      hasAnimatedSlots: animatedSlots.length > 0,
+    };
+    if (overlayScrollState.hasAnimatedSlots) {
+      redrawAtlasWithOffsets(animatedSlots);
+    }
   } else {
     // No overlays with textures
     mat.setVector2('uAtlasDims', new BABYLON.Vector2(1, 1));
@@ -1012,15 +1132,3 @@ function nodeBaseHslOverlayAware(vz, vx, baseH_U, baseS_U, baseL_U, baseH_O, bas
   // Underlay per-tile HSL (already attenuated once when building baseS_U/baseL_U)
   return { h: baseH_U[tz][tx]|0, s: baseS_U[tz][tx]|0, l: baseL_U[tz][tx]|0 };
 }
-
-
-
-
-
-
-
-
-
-
-
-

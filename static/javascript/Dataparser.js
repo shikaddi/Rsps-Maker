@@ -1,5 +1,6 @@
 // Helpers to parse map XML and start the scene
-function parseTileDataFromXml(doc) {
+function parseTileDataFromXml(doc, underlaysData) {
+  console.log("inside parsTileDataFromXml", underlaysData.length);
   const mapEl = doc.querySelector('map');
   const width = parseInt(mapEl.getAttribute('width'), 10);
   const height = parseInt(mapEl.getAttribute('height'), 10);
@@ -150,7 +151,8 @@ function parseTileDataFromXml(doc) {
         const v = underlayCSV[idx] | 0;
         // If using Tiled GIDs, users can pre-map them to RS underlay ids in CSV.
         // Here we assume CSV already contains RS underlay ids.
-        if (underlays[v]) uId = v; else uId = defaultU;
+      const underlaysArr = Array.isArray(underlaysData) ? underlaysData : (typeof underlays !== 'undefined' ? underlays : []);
+      if (underlaysArr[v]) uId = v; else uId = defaultU;
       }
       // Choose overlay id per tile, from map if available; fallback to default/global.
       const defaultO = (typeof window !== 'undefined' && typeof window.defaultOverlayId === 'number')
