@@ -2,11 +2,32 @@
 from flask import Flask, render_template, request, abort, send_file, jsonify
 from flask import Response
 from flask_compress import Compress
-from .ObjectDefinition import get_objects_with_gltf
+from .ObjectDefinition import (
+    get_objects_with_gltf,
+    build_model_palette,
+    build_model_lighting_factors,
+)
+from pathlib import Path
+from .Animation import export_animation, PKG_DIR
 
 app = Flask(__name__)
 compress = Compress()
 compress.init_app(app)
+
+# Precompute the legacy model palette so downstream calls can reuse it.
+MODEL_PALETTE = build_model_palette()
+MODEL_LIGHTING_FACTORS = build_model_lighting_factors()
+
+
+ANIMATION_JSON_MAP = {
+    481: os.path.join(
+        os.path.dirname(__file__),
+        "static",
+        "animation",
+        "object_7376_type_4_model_2255_animationID481.json",
+    ),
+}
+
 
 def json_safe(value):
     if isinstance(value, (str, int, float, bool)) or value is None:
@@ -24,8 +45,8 @@ def json_safe(value):
 
 
 @app.route("/")
-def hello_world():
-    return render_template('BabylonTest.html')
+def Start():
+    return render_template('Mapviewer.html')
 
 
 # Development helper: serve the example objects JSON from project root
@@ -39,6 +60,42 @@ def serve_objects_651():
         return send_file(path, mimetype="application/json")
     except Exception as e:
         abort(500, description=str(e))
+
+
+@app.get("/api/animation/<int:animation_id>")
+def serve_animation_json(animation_id: int):
+    object_id = request.args.get("object_id", type=int)
+    model_type = request.args.get("model_type", type=int)
+    model_id = request.args.get("model_id", type=int)
+
+    path = None
+
+    if object_id is not None and model_type is not None and model_id is not None:
+        base_mesh_relative = os.path.join(
+            "static",
+            "objects",
+            f"object_{object_id}_type_{model_type}_model_{model_id}.gltf",
+        )
+        base_mesh_abs = os.path.join(os.path.dirname(__file__), base_mesh_relative)
+        if not os.path.exists(base_mesh_abs):
+            abort(404, description="Base mesh not found")
+
+        mesh_name = Path(base_mesh_relative).stem
+        cached_path = PKG_DIR / "static" / "animation" / f"{mesh_name}_animationID{animation_id}.json"
+        if cached_path.exists():
+            path = str(cached_path)
+        else:
+            try:
+                path = export_animation(animation_id, base_mesh_relative)
+            except Exception as exc:
+                abort(500, description=f"Failed to export animation: {exc}")
+    else:
+        path = ANIMATION_JSON_MAP.get(animation_id)
+
+    if not path or not os.path.exists(path):
+        abort(404)
+    app.logger.info("Serving animation %s from %s", animation_id, path)
+    return send_file(path, mimetype="application/json")
 
 
 @app.get('/favicon.ico')
@@ -112,7 +169,14 @@ def generate_and_send_gltf():
     objects_dir = os.path.join(os.path.dirname(__file__), "static", "objects")
     os.makedirs(objects_dir, exist_ok=True)
 
+    print(f"[api] processing {len(unique_pairs)} unique object/type pairs; sample={unique_pairs[:5]}")
     results = get_objects_with_gltf(unique_pairs, out_dir=objects_dir, hide_untextured=False)
+    print(f"[api] get_objects_with_gltf returned {len(results)} entries; keys_sample={list(results.keys())[:5]}")
+    if results:
+        for idx, (key, value) in enumerate(results.items()):
+            if idx >= 5:
+                break
+            print(f"[api]   {key}: gltf={value.get('gltf')} error={value.get('error')}")
     response_objects = []
     for oid, typ in unique_pairs:
         key = f"{oid}-{typ}"
@@ -120,7 +184,7 @@ def generate_and_send_gltf():
         entry.setdefault("object_id", oid)
         entry.setdefault("model_type", typ)
         response_objects.append(json_safe(entry))
-        if(key == "1011-10"):
+        if(key == "9515-10"):
             print(entry)
 
     return jsonify({
