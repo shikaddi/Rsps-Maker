@@ -515,10 +515,15 @@ async function instantiateObjectInstances(scene, entry, occurrences, ctx, contai
       const childMeshes = root.getChildMeshes(true);
       childMeshes.forEach((mesh) => meshesForUpdate.push(mesh));
     }
-    meshesForUpdate.forEach((mesh) => {
+    for (const mesh of meshesForUpdate) {
       copyGltfMetadataFromSource(mesh);
       makeMeshGeometryUpdatable(mesh);
-    });
+      scene.onAfterRenderObservable.addOnce(() => {
+        registerAnimatedObjectTextures(scene, mesh).catch((err) => {
+          console.warn('registerAnimatedObjectTextures failed', err);
+        });
+      });
+    }
 
     const isType2 = (Number(occurrence.type) | 0) === 2;
     let type2Clone = null;
@@ -597,7 +602,6 @@ async function instantiateObjectInstances(scene, entry, occurrences, ctx, contai
       } catch (_) {}
     });
   });
-  roots.getChildMeshes().map(m => m.name)
   return roots;
 }
 
@@ -1424,6 +1428,181 @@ function makeMeshGeometryUpdatable(mesh) {
   });
 }
 
+async function registerAnimatedObjectTextures(scene, mesh) {
+  if (!mesh || !scene || !scene.metadata) return;
+  const animator = scene.metadata.objectTextureAnimator;
+  if (!animator || !animator.animatedIds || animator.animatedIds.size === 0) return;
+
+  const forcedAnimatedMap = collectAnimatedTextureDataFromExtras(mesh);
+  const restrictToExtras = forcedAnimatedMap.size > 0;
+  if (!restrictToExtras) return;
+  const materials = new Set();
+  if (mesh.material) materials.add(mesh.material);
+  if (typeof mesh.getChildMeshes === 'function') {
+    mesh.getChildMeshes(false).forEach((child) => {
+      if (child.material) materials.add(child.material);
+    });
+  }
+  if (materials.size === 0) return;
+
+  const textureSlots = [
+    'albedoTexture',
+    'diffuseTexture',
+    'opacityTexture',
+    'emissiveTexture',
+    'reflectionTexture',
+    'metallicTexture',
+  ];
+
+  for (const material of materials) {
+    console.log("material: ", material);
+    for (const slot of textureSlots) {
+      console.log("slot: ", slot)
+      const tex = material[slot];
+      console.log("tex: ", tex);
+      if (!tex) continue;
+      const texId = extractTextureIdFromUrl(tex.url || tex.name || '');
+      if (texId < 0) continue;
+      const faceList = forcedAnimatedMap.get(texId);
+      if (!faceList || faceList.length === 0) continue;
+      console.log("facelist: ", faceList);
+      if (tex.onLoadObservable && !tex.isReady()) {
+        tex.onLoadObservable.addOnce(() => {
+          maybeAttachAnimatedTexture(scene, animator, material, slot, tex, texId, faceList).catch((err) => {
+            console.warn('maybeAttachAnimatedTexture deferred failed', err);
+          });
+        });
+        continue;
+      }
+      console.log("about the caall maybeAttachAnimatedTexture");
+      await maybeAttachAnimatedTexture(scene, animator, material, slot, tex, texId, faceList);
+    }
+  }
+}
+
+function collectAnimatedTextureDataFromExtras(mesh) {
+  const map = new Map();
+  if (!mesh) return map;
+  const gltfMeta = mesh?.metadata?.gltf || {};
+  const extras = gltfMeta.extras;
+  if (extras && Array.isArray(extras.rs_animated_faces)) {
+    extras.rs_animated_faces.forEach((entry) => {
+      if (!Array.isArray(entry) || entry.length < 2) return;
+      const faceIdx = entry[0];
+      const texId = entry[1];
+      if (!Number.isFinite(texId)) return;
+      const key = texId | 0;
+      if (!map.has(key)) {
+        map.set(key, []);
+      }
+      if (Number.isFinite(faceIdx)) {
+        map.get(key).push(faceIdx | 0);
+      }
+    });
+  }
+  return map;
+}
+
+async function maybeAttachAnimatedTexture(scene, animator, material, slot, sourceTexture, texIdOverride, faceList) {
+  if (!sourceTexture) return;
+  const extracted = Number.isFinite(texIdOverride)
+    ? texIdOverride
+    : extractTextureIdFromUrl(sourceTexture.url || sourceTexture.name || '');
+  const texId = extracted | 0;
+  if (!animator.animatedIds.has(texId)) return;
+
+  const entry = await ensureAnimatedObjectTexture(scene, animator, texId, sourceTexture);
+  if (!entry || !entry.dynamicTexture) return;
+  if (faceList && faceList.length) {
+    entry.faces = entry.faces || [];
+    entry.faces.push(...faceList);
+  }
+  if (material[slot] === entry.dynamicTexture) return;
+
+  //material[slot] = entry.dynamicTexture;
+  if (material[slot] !== entry.dynamicTexture) {
+    material[slot] = entry.dynamicTexture;
+    if (typeof material.markAsDirty === 'function') {
+      material.markAsDirty(BABYLON.Material.TextureDirtyFlag);
+    }
+  }
+  entry.targets = entry.targets || [];
+  entry.targets.push({ material, slot });
+}
+
+function extractTextureIdFromUrl(url) {
+  if (!url || typeof url !== 'string') return -1;
+  const match = url.match(/texture_(\d+)\.png/i);
+  if (!match) return -1;
+  return Number(match[1]) | 0;
+}
+
+function resolveTextureUrl(sourceTexture) {
+  if (!sourceTexture) return null;
+  const raw = sourceTexture.url || sourceTexture.name || '';
+  if (!raw) return null;
+  if (raw.startsWith('data:')) {
+    const trimmed = raw.slice(5); // drop "data:"
+    if (!trimmed) return null;
+    return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  }
+  return raw;
+}
+
+async function ensureAnimatedObjectTexture(scene, animator, texId, sourceTexture) {
+  if (animator.entries.has(texId)) {
+    const existing = animator.entries.get(texId);
+    if (existing.dynamicTexture) return existing;
+  }
+
+  const imageUrl = resolveTextureUrl(sourceTexture);
+  if (!imageUrl) return null;
+  const img = await loadImageElement(imageUrl);
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, 0, 0);
+
+  const dyn = new BABYLON.DynamicTexture(`objAnim_${texId}`, { width: canvas.width, height: canvas.height }, scene, false);
+  const texCtx = dyn.getContext();
+  texCtx.imageSmoothingEnabled = false;
+  texCtx.drawImage(canvas, 0, 0);
+  dyn.update();
+  dyn.hasAlpha = !!sourceTexture.hasAlpha;
+  dyn.wrapU = BABYLON.Texture.WRAP_ADDRESSMODE;
+  dyn.wrapV = BABYLON.Texture.WRAP_ADDRESSMODE;
+
+  const speedDef = animator.speedMap?.get(texId) || { x: 0, y: 0 };
+  const TICK_MS = 20;
+  const entry = {
+    id: texId,
+    canvas,
+    ctx,
+    dynamicTexture: dyn,
+    offsets: new Float32Array([0, 0]),
+    speed: {
+      x: (speedDef.x || 0) / TICK_MS,
+      y: (speedDef.y || 0) / TICK_MS,
+    },
+    targets: [],
+    baseImage: img,
+  };
+  animator.entries.set(texId, entry);
+  return entry;
+}
+
+function loadImageElement(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = (err) => reject(err);
+    img.src = url;
+  });
+}
+
 function cloneMetadata(meta) {
   if (!meta) return null;
   try {
@@ -1480,6 +1659,9 @@ function copyGltfMetadataFromSource(mesh) {
   mesh.metadata = mesh.metadata || {};
   mesh.metadata.gltf = mesh.metadata.gltf || {};
   mesh.metadata.gltf.extras = clonedExtras;
+  if (Array.isArray(source?.metadata?.gltf?.primitives)) {
+    mesh.metadata.gltf.primitives = cloneMetadata(source.metadata.gltf.primitives);
+  }
 
   if (mesh.geometry) {
     mesh.geometry.metadata = mesh.geometry.metadata || {};

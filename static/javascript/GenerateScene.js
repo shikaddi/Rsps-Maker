@@ -3,10 +3,7 @@ let paletteTex  = null;
 async function generateScene(tileData, nodeHeights, vertexBrightness) {
   const scene = new BABYLON.Scene(engine);
   scene.clearColor = new BABYLON.Color3(0.5, 0.7, 1.0);
-
-  if(!paletteTex ) {
-     paletteTex  = window.buildPaletteTexture(scene, window.HslToRgb);
-  }
+  scene.metadata = scene.metadata || {};
 
   // Build 2D grids of underlay/overlay ids per tile
   const underlayIdGrid = tileData.map(row => row.map(t => t.underlayId));
@@ -15,11 +12,33 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
   const cellSize = 64; // overlay atlas cells (source textures are 128px, but we downsample to 64px)
   const overlayScrollPxPerTick = new Map([
     [1,  { x: 1, y: 0 }],
-    [17, { x: 1, y: 0 }],
+    [17, { x: 0, y: 4 }],
     [24, { x: 1, y: 0 }],
     [31, { x: 1, y: 0 }],
     [40, { x: 1, y: 0 }],
   ]);
+
+  // Prepare shared cache for animated object textures so meshes and the
+  // per-frame updater can cooperate without globals sprinkled everywhere.
+  const animatedObjectTextureIds = new Set([1, 17, 24, 31, 40]);
+  if (!scene.metadata.objectTextureAnimator) {
+    scene.metadata.objectTextureAnimator = {
+      animatedIds: animatedObjectTextureIds,
+      entries: new Map(), // textureId -> { canvas, ctx, dynamicTex, offsets, speeds }
+      speedMap: new Map(),
+    };
+  } else {
+    // keep any existing entries but refresh the id list in case it changed
+    scene.metadata.objectTextureAnimator.animatedIds = animatedObjectTextureIds;
+    scene.metadata.objectTextureAnimator.speedMap = scene.metadata.objectTextureAnimator.speedMap || new Map();
+  }
+  overlayScrollPxPerTick.forEach((value, key) => {
+    scene.metadata.objectTextureAnimator.speedMap.set(key, { ...value });
+  });
+
+  if(!paletteTex ) {
+     paletteTex  = window.buildPaletteTexture(scene, window.HslToRgb);
+  }
   const OVERLAY_SCROLL_TICK_MS = 20;
   const MAX_OVERLAY_SCROLL_SLOTS = 128;
   const overlayScrollOffsets = new Float32Array(MAX_OVERLAY_SCROLL_SLOTS * 2);
@@ -240,6 +259,52 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
     };
   }
 
+  function advanceObjectTextureScroll(deltaMs, animator) {
+    if (!animator || !animator.entries || animator.entries.size === 0) return;
+    if (deltaMs <= 0) return;
+    const elapsed = deltaMs;
+    animator.entries.forEach((entry) => {
+      if (!entry || !entry.canvas || !entry.ctx || !entry.dynamicTexture) return;
+      const speed = entry.speed || { x: 0, y: 0 };
+      if (!speed.x && !speed.y) return;
+      const w = entry.canvas.width || cellSize;
+      const h = entry.canvas.height || cellSize;
+      entry.offsets[0] = (entry.offsets[0] + (speed.x || 0) * elapsed / w) % 1;
+      entry.offsets[1] = (entry.offsets[1] + (speed.y || 0) * elapsed / h) % 1;
+      redrawObjectTexture(entry);
+    });
+  }
+
+  function redrawObjectTexture(entry) {
+    const { ctx, canvas, offsets, dynamicTexture } = entry;
+    if (!ctx || !canvas || !dynamicTexture) return;
+    const w = canvas.width;
+    const h = canvas.height;
+    const scratch = entry.scratch || (() => {
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      entry.scratch = c;
+      entry.scratchCtx = c.getContext('2d');
+      entry.scratchCtx.imageSmoothingEnabled = false;
+      return c;
+    })();
+    const sctx = entry.scratchCtx;
+    const offsetPxX = offsets[0] * w;
+    const offsetPxY = offsets[1] * h;
+    sctx.clearRect(0, 0, w, h);
+    for (let dx = -w; dx <= w; dx += w) {
+      for (let dy = -h; dy <= h; dy += h) {
+        sctx.drawImage(canvas, dx - offsetPxX, dy - offsetPxY, w, h);
+      }
+    }
+    const texCtx = dynamicTexture.getContext();
+    texCtx.imageSmoothingEnabled = false;
+    texCtx.clearRect(0, 0, w, h);
+    texCtx.drawImage(scratch, 0, 0);
+    dynamicTexture.update();
+  }
+
   /**
    * 
    * 
@@ -409,6 +474,7 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
       mat.setFloat('uHD', window.HD ? 1.0 : 0.0);
       mat.setMatrix('world', mesh.getWorldMatrix());
       advanceOverlayScroll(engineRef.getDeltaTime());
+      advanceObjectTextureScroll(engineRef.getDeltaTime(), scene.metadata.objectTextureAnimator);
     } catch(e) {}
   });
 
@@ -591,7 +657,6 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
       mat.setTexture('uOverlayAtlasAnimated', animatedAtlasTex);
       mat.setVector2('uAtlasDimsAnimated', new BABYLON.Vector2(animatedAtlasInfo.cols, animatedAtlasInfo.rows));
       initOverlayScrollState(animatedTexIds);
-      console.log("got to line 592", animatedTexIds, texMetaById);
     }
   }
   if (!animatedAtlasTex) {
@@ -647,7 +712,7 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
             if (useAnimated) flags |= 4;
             g = flags & 255;
             a = 255;
-            console.log(`tile ${z},${x} overlayId=${tileData[z][x].overlayId} tid=${tid} g=${g} slot=${texIdx}${useAnimated ? ' [animated]' : ''}`);
+            //console.log(`tile ${z},${x} overlayId=${tileData[z][x].overlayId} tid=${tid} g=${g} slot=${texIdx}${useAnimated ? ' [animated]' : ''}`);
           }
         }
       }
