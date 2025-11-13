@@ -7,8 +7,12 @@ const HARDWARE_INSTANCE_BLOCKLIST = new Set();
 async function renderObjectsFromBackend(scene, objects, ctx) {
   if (!Array.isArray(objects) || objects.length === 0) return [];
 
+  // Create a cache of empty gltf models, keyed by object id and type
   const cache = ensureObjectCache(scene);
 
+  // Create occurenceMap. Fill the map. The key is the combination of objectid and type (same as cache).
+  // it maps the location of each object (data from the object json). one key can contain multiple ocations.
+  // Ensures each GLTF is fetched once while preserving all the coordinates
   const occurrenceMap = new Map();
   for (const raw of objects) {
     if (!raw) continue;
@@ -20,14 +24,15 @@ async function renderObjectsFromBackend(scene, objects, ctx) {
     occurrenceMap.get(key).push(raw);
   }
   if (occurrenceMap.size === 0) return [];
-
+  
+  // create a request for gltf files on the basis the objectId-type key. rawBody is the resulting gltf
+  // One gltf per unique key. The resulting resultJson.objects to align with the keys
   const payload = {
     objects: Array.from(occurrenceMap.keys()).map((key) => {
       const parts = key.split('-');
       return { id: Number(parts[0]) | 0, type: Number(parts[1]) | 0 };
     }),
   };
-
   const res = await fetch('/api/gltf', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -37,7 +42,6 @@ async function renderObjectsFromBackend(scene, objects, ctx) {
   if (!res.ok) {
     throw new Error('GLTF export failed: ' + res.status + ' ' + res.statusText + ' ' + rawBody);
   }
-
   let resultJson;
   try {
     resultJson = rawBody ? JSON.parse(rawBody) : {};
@@ -45,9 +49,13 @@ async function renderObjectsFromBackend(scene, objects, ctx) {
     const msg = (err && err.message) ? err.message : String(err);
     throw new Error('GLTF response parse failed: ' + msg + ' ' + rawBody);
   }
-
   const uniqueEntries = Array.isArray(resultJson?.objects) ? resultJson.objects : [];
+  
 
+  // prepare animation of objects. Both animated textures and morph target animations
+  // Data is stored in Animationstore for later binding of animations to models without re-fetching
+  // TODO
+  // Bug alert: if there is more than one object sharing an object-type combination, then only the first rendered object will have its animated textures animated, others will have static textures.
   for (const entry of uniqueEntries) {
     const entryDefinition = entry?.objectdef || entry?.objectDef;
     const animId = Number(entryDefinition?.animationID);
@@ -73,7 +81,9 @@ async function renderObjectsFromBackend(scene, objects, ctx) {
     }
   }
 
+
   const renderPromises = uniqueEntries.map(async (entry) => {
+    // get all the locations per object id-type combination
     if (!entry || entry.gltf === 'no model' || !entry.gltf) return [];
     const id = Number(entry.object_id ?? entry.objectId);
     const type = Number(entry.model_type ?? entry.modelType);
@@ -84,14 +94,19 @@ async function renderObjectsFromBackend(scene, objects, ctx) {
 
     let container = cache.containers.get(key);
     if (!container) {
+      // get the gltf model
       const gltfFilename = String(entry.gltf).split(/[\\/]/).pop();
       if (!gltfFilename) return [];
       const gltfUrl = (typeof staticUrl === 'function')
         ? staticUrl('objects/' + gltfFilename)
         : '/static/objects/' + gltfFilename;
+      // Get the "extra's" data from the gltf's to map rs to gltf coordinates
       const meshExtras = await ensureGltfExtras(gltfFilename);
       try {
+        // Loads gltf file into asset container. It returns a contains holding all meshes, materials, etc.,
+        // only one gltf file per unique key
         container = await BABYLON.SceneLoader.LoadAssetContainerAsync('', gltfUrl, scene);
+        // if there are mesh extra's available, read it and make it available for later via copying the metadata onto mashes
         if (meshExtras && Array.isArray(meshExtras)) {
           container.meshes.forEach((mesh, idx) => {
             const extrasEntry = meshExtras[idx];
@@ -116,6 +131,7 @@ async function renderObjectsFromBackend(scene, objects, ctx) {
             }
           });
         }
+        // store the fetched gltf models into the cache. Cached the container for reuse
         cache.containers.set(key, container);
       } catch (loadErr) {
         console.warn('Failed to load GLTF asset', gltfUrl, loadErr);
@@ -123,61 +139,30 @@ async function renderObjectsFromBackend(scene, objects, ctx) {
       }
     }
 
+    // Check if we want to use instances for this object model.
     const entryDefinition = entry.objectdef || null;
     const instanceReport = evaluateHardwareInstanceEligibility(entry, entryDefinition, container);
-    logHardwareInstanceReport(instanceReport);
-
-
-    return instantiateObjectInstances(scene, entry, occurrences, ctx, container, cache, key);
+    //logHardwareInstanceReport(instanceReport);
+    return instantiateObjectInstances(scene, entry, occurrences, ctx, container, cache, key, instanceReport.eligible);
   });
 
   const renderedRootsNested = await Promise.all(renderPromises);
   return renderedRootsNested.flat();
 }
 
-
-function instantiateSingleRoot(container, scene, entry, index, suffix = '') {
-  try {
-    const inst = container.instantiateModelsToScene(
-      (name) => name + '_obj' + entry.object_id + '_' + index + suffix + '_' + Date.now(),
-      true,
-    );
-    const roots = inst?.rootNodes && inst.rootNodes.length
-      ? inst.rootNodes
-      : (inst?.meshes || []).filter((mesh) => !mesh.parent);
-    let root = null;
-    if (roots.length === 1) {
-      root = roots[0];
-    } else if (roots.length > 1) {
-      root = new BABYLON.TransformNode('object_' + entry.object_id + '_' + index + suffix + '_root', scene);
-      roots.forEach((node) => {
-        if (node) node.parent = root;
-      });
-    }
-    if (!root) {
-      console.warn('instantiateSingleRoot: no root nodes for', entry);
-      return null;
-    }
-    const meshes = [];
-    if (root instanceof BABYLON.Mesh) {
-      meshes.push(root);
-    }
-    if (typeof root.getChildMeshes === 'function') {
-      root.getChildMeshes(true).forEach((mesh) => meshes.push(mesh));
-    }
-    meshes.forEach((mesh) => copyGltfMetadataFromSource(mesh));
-
-    (inst?.animationGroups || []).forEach((group) => {
-      try { group.stop(); } catch (_) {}
-    });
-    return root;
-  } catch (err) {
-    console.warn('instantiateSingleRoot failed', err);
-    return null;
-  }
-}
-
-async function instantiateObjectInstances(scene, entry, occurrences, ctx, container, cache, cacheKey) {
+/* scene: the entire babylon scene on which everything will be rendered
+// entry: the unique entry
+// occurences: every location for the unique entry
+// ctx: The placement context object "{gridW: width,
+        gridH: height,
+        tileSize,
+        nodeHeights}"
+// container: the gltf model fetched from the back-end     
+// cache: the cache of unique keys and containers
+// key: the objectid-type key
+// isInstance: whether a hardware instance will be used for this model      
+*/
+async function instantiateObjectInstances(scene, entry, occurrences, ctx, container, cache, cacheKey, isInstance) {
   const roots = [];
   if (!occurrences || occurrences.length === 0) return roots;
 
@@ -694,6 +679,47 @@ function placeObjectInstance(root, obj, footprint, ctx) {
   };
 }
 
+function instantiateSingleRoot(container, scene, entry, index, suffix = '') {
+  try {
+    const inst = container.instantiateModelsToScene(
+      (name) => name + '_obj' + entry.object_id + '_' + index + suffix + '_' + Date.now(),
+      true,
+    );
+    const roots = inst?.rootNodes && inst.rootNodes.length
+      ? inst.rootNodes
+      : (inst?.meshes || []).filter((mesh) => !mesh.parent);
+    let root = null;
+    if (roots.length === 1) {
+      root = roots[0];
+    } else if (roots.length > 1) {
+      root = new BABYLON.TransformNode('object_' + entry.object_id + '_' + index + suffix + '_root', scene);
+      roots.forEach((node) => {
+        if (node) node.parent = root;
+      });
+    }
+    if (!root) {
+      console.warn('instantiateSingleRoot: no root nodes for', entry);
+      return null;
+    }
+    const meshes = [];
+    if (root instanceof BABYLON.Mesh) {
+      meshes.push(root);
+    }
+    if (typeof root.getChildMeshes === 'function') {
+      root.getChildMeshes(true).forEach((mesh) => meshes.push(mesh));
+    }
+    meshes.forEach((mesh) => copyGltfMetadataFromSource(mesh));
+
+    (inst?.animationGroups || []).forEach((group) => {
+      try { group.stop(); } catch (_) {}
+    });
+    return root;
+  } catch (err) {
+    console.warn('instantiateSingleRoot failed', err);
+    return null;
+  }
+}
+
 function toggleDebugBoundingBox(root, obj) {
   if (!root || !obj) return;
   if (DEBUG_OBJECT_TYPE === null) return;
@@ -717,6 +743,7 @@ function ensureObjectCache(scene) {
       instances: new Map(),
     };
   }
+  console.log(scene.metadata._objectCache)
   return scene.metadata._objectCache;
 }
 
