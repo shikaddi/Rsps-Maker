@@ -10,6 +10,9 @@
 <body style="margin:0; overflow:hidden;">
 <canvas id="renderCanvas" style="width:100%; height:100%;"></canvas>
 <script>window.STATIC_BASE = "{{ url_for('static', filename='') }}";</script>
+<script src="{{ url_for('static', filename='javascript/objectJsonParsing.js') }}"></script>
+<script src="{{ url_for('static', filename='javascript/objectAnimationHelpers.js') }}"></script>
+<script src="{{ url_for('static', filename='javascript/objectTransformHelpers.js') }}"></script>
 <script src="{{ url_for('static', filename='javascript/Helper.js') }}"></script>
 <script src="{{ url_for('static', filename='javascript/UnderlaysData.js') }}"></script>
 <script src="{{ url_for('static', filename='javascript/Debug.js') }}"></script>
