@@ -22,7 +22,7 @@ function parseTileDataFromXml(doc, underlaysData) {
   // Normalize to [0,1] then scale to heightScale
   const vMin = Math.min(...rawValues);
   const vMax = Math.max(...rawValues);
-  const range = (vMax - vMin) || 1;
+  const range = 600;//(vMax - vMin) || 1;
 
   // Build a 2D grid of the raw heights (no normalization) for lighting
   const rawGrid = Array.from({ length: height }, (_, z) =>

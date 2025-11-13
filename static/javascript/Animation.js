@@ -335,10 +335,10 @@
     const positions = mesh.getVerticesData ? mesh.getVerticesData(kind, true, true) : null;
     if (!positions || positions.length === 0) return false;
 
-    console.log(
+    /*console.log(
       `[AnimationStore] mesh ${mesh.name || mesh.id} position sample (first 30 floats):`,
       Array.from(positions.slice(0, 30)),
-    );
+    );*/
 
     const basePositions =
     positions instanceof Float32Array ? new Float32Array(positions) : new Float32Array(positions);
@@ -724,7 +724,7 @@
     const animData = await prepareAnimation(animationId, options);
     if (!animData) return null;
     const some = animData.groups && animData.groups[0] && animData.groups[0].vertices && animData.groups[0].vertices[0];
-    console.log('sample group vertex value', some);
+    //console.log('sample group vertex value', some);
     const meshes = [];
     if (BABYLON_NS && rootNode instanceof BABYLON_NS.Mesh) {
       meshes.push(rootNode);
@@ -765,7 +765,7 @@
         if (!debugState || typeof debugState.__applyFrame !== 'function') return;
         debugState.frameIndex = (debugState.frameIndex + 1) % debugState.frames.length;
         const frame = debugState.frames[debugState.frameIndex];
-        console.log(`[AnimationStore] manual advance -> frame ${frame.frameId} index ${debugState.frameIndex}`);
+        //console.log(`[AnimationStore] manual advance -> frame ${frame.frameId} index ${debugState.frameIndex}`);
         debugState.__applyFrame(frame, true);
       });
       global.__AnimationDebugListenerAttached = true;

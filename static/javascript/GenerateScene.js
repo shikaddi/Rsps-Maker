@@ -426,7 +426,6 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
   vd.positions = positions;
   vd.indices   = indices;
   vd.uvs       = uvs;
-  // vd.colors    = colors; // not used by shader path
   const wrapper = new BABYLON.TransformNode('mirrorWrapper', scene);
   mesh.parent = wrapper;
   wrapper.scaling.z = -1;
@@ -1019,5 +1018,22 @@ async function generateScene(tileData, nodeHeights, vertexBrightness) {
   } catch (e) {
     console.warn('Failed to publish render context:', e);
   }
+  window.DEBUG_SCENE = scene;
   return scene;
 }
+
+/*
+const scene = window.DEBUG_SCENE;
+if (scene) {
+  scene.meshes.forEach((mesh) => {
+    console.log({
+      name: mesh.name,
+      id: mesh.id,
+      isVisible: mesh.isVisible,
+      visibility: mesh.visibility,
+      scaling: mesh.scaling?.asArray?.(),
+      position: mesh.getAbsolutePosition?.()?.asArray?.(),
+    });
+  });
+}
+  */

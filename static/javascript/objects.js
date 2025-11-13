@@ -1,248 +1,9 @@
-// Load and parse RS object JSON produced by your Python script.
-// Accepts a path (relative or absolute). Tries a few URL candidates for convenience.
-async function loadAndParseObjectsJson(path = '651.json') {
-  const candidates = [];
-  const norm = String(path).replace(/^\/+/, '');
-  // As-is
-  candidates.push(path);
-  // Root-relative
-  candidates.push('/' + norm);
-  // Under Flask static base if available
-  try {
-    if (window.STATIC_BASE) {
-      const base = String(window.STATIC_BASE);
-      const baseNorm = base.endsWith('/') ? base : base + '/';
-      candidates.push(baseNorm + norm);
-    }
-  } catch {}
-
-  let lastErr = null;
-  for (const url of candidates) {
-    try {
-      const res = await fetch(url, { cache: 'no-cache' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      return normalizeObjectEntries(data);
-    } catch (e) {
-      lastErr = e;
-      // Try next candidatef
-    }
-  }
-  throw lastErr || new Error('Failed to load objects JSON');
-}
-
 // Set to a type number to render only matching objects (e.g., 3 for square corners).
 const DEBUG_OBJECT_TYPE = null;
-const gltfExtrasCache = new Map();
-
-async function ensureGltfExtras(filename) {
-  if (!filename) return null;
-  if (gltfExtrasCache.has(filename)) {
-    return gltfExtrasCache.get(filename);
-  }
-  try {
-    const resp = await fetch(`/static/objects/${filename}`, { cache: 'force-cache' });
-    if (!resp.ok) {
-      gltfExtrasCache.set(filename, null);
-      return null;
-    }
-    const json = await resp.json();
-    const meshExtras = (json.meshes || []).map((mesh) => {
-      const prims = mesh.primitives || [];
-      return {
-        meshExtras: mesh.extras || null,
-        primitiveExtras: prims.map((prim) => prim?.extras || null),
-      };
-    });
-    gltfExtrasCache.set(filename, meshExtras);
-    return meshExtras;
-  } catch (err) {
-    console.warn('Failed to fetch glTF extras for', filename, err);
-    gltfExtrasCache.set(filename, null);
-    return null;
-  }
-}
-
-function parseModelInfoFromPath(gltfPath) {
-  if (!gltfPath || typeof gltfPath !== 'string') return null;
-  const name = gltfPath.split(/[\\/]/).pop() || '';
-  const match = name.match(/object_(\d+)_type_(\d+)_model_(\d+)\.gltf$/i);
-  if (!match) return null;
-  return {
-    objectId: Number(match[1]) | 0,
-    modelType: Number(match[2]) | 0,
-    modelId: Number(match[3]) | 0,
-  };
-}
-
-function buildAnimationOptions(entry) {
-  const opts = {};
-  const parsed = parseModelInfoFromPath(entry?.gltf);
-  if (parsed) {
-    opts.objectId = parsed.objectId;
-    opts.modelType = parsed.modelType;
-    opts.modelId = parsed.modelId;
-    return opts;
-  }
-  const objectId = Number(entry?.object_id ?? entry?.objectId);
-  if (Number.isFinite(objectId)) opts.objectId = objectId | 0;
-  const modelType = Number(entry?.model_type ?? entry?.modelType);
-  if (Number.isFinite(modelType)) opts.modelType = modelType | 0;
-  const usedModels = entry?.used_model_ids;
-  if (Array.isArray(usedModels) && usedModels.length) {
-    const modelId = Number(usedModels[0]);
-    if (Number.isFinite(modelId)) opts.modelId = modelId | 0;
-  }
-  return opts;
-}
-
-// Normalize entries to a consistent structure for later rendering
-function normalizeObjectEntries(arr) {
-  if (!Array.isArray(arr)) throw new Error('Objects JSON must be an array');
-  const out = [];
-  for (const it of arr) {
-    if (!it) continue;
-    if (DEBUG_OBJECT_TYPE !== null) {
-      const typeCandidate = toInt(it.t, it.type, it.model_type, it.modelType);
-      if ((typeCandidate | 0) !== (DEBUG_OBJECT_TYPE | 0)) continue;
-    }
-    const objDef = it.objectdef || it.objectDef || null;
-    // Support both exact keys and fallback to alternative naming if ever changes
-    const id = toInt(it.id, it.object_id, it.objectId);
-    const planeRaw = toInt(it.p, it.plane, objDef?.plane, 0);
-    // switched x and y around, as the x,y coordinates in the object map file were reversed compared to babylon
-    const xRaw = toInt(it.y, it.worldY, it.tileY);
-    const yRaw = toInt(it.x, it.worldX, it.tileX);
-    const type = toInt(it.t, it.type, it.model_type, it.modelType);
-    const rot = toInt(it.r, it.rotation, 0) & 3;
-    if (!isFinite(id) || !isFinite(xRaw) || !isFinite(yRaw) || !isFinite(type)) {
-      // Skip malformed entries but continue parsing the rest
-      continue;
-    }
-
-    const plane = Number.isFinite(planeRaw) ? planeRaw : 0;
-    const x = xRaw;
-    const y = yRaw;
-
-    const sizeX = toInt(it.sizeX, objDef?.sizeX);
-    const sizeY = toInt(it.sizeY, objDef?.sizeY);
-
-    const offsets = {
-      x: toInt(it.offsetX, objDef?.offsetX, 0),
-      y: toInt(it.offsetY, objDef?.offsetY, 0),
-      h: toInt(it.offsetH, objDef?.offsetH, 0),
-    };
-
-    const translate = {
-      x: toInt(it.translateX, objDef?.translateX, 0),
-      y: toInt(it.translateY, objDef?.translateY, 0),
-      z: toInt(it.translateZ, objDef?.translateZ, 0),
-    };
-
-    const scale = {
-      x: toInt(it.scaleX, objDef?.scaleX, 128),
-      y: toInt(it.scaleY, objDef?.scaleY, 128),
-      z: toInt(it.scaleZ, objDef?.scaleZ, 128),
-    };
-
-    const modelSize = {
-      x: toInt(it.modelSizeX, objDef?.modelSizeX, scale.x),
-      y: toInt(it.modelSizeY, objDef?.modelSizeY, scale.y),
-      h: toInt(it.modelSizeH, objDef?.modelSizeH, scale.z),
-    };
-
-    const brightness = toInt(it.brightness, objDef?.brightness, 0);
-    const contrast = toInt(it.contrast, objDef?.contrast, 0);
-    const ambientLighting = toInt(it.ambientLighting, objDef?.ambientLighting, 0);
-    const lightDiffusion = toInt(it.lightDiffusion, objDef?.lightDiffusion, 0);
-
-    const flags = {
-      adjustToTerrain: toBool(it.adjustToTerrain, objDef?.adjustToTerrain),
-      contouredGround: toBool(it.contouredGround, objDef?.contouredGround),
-      nonFlatShading: toBool(it.nonFlatShading, objDef?.nonFlatShading),
-      delayShading: toBool(it.delayShading, objDef?.delayShading),
-      castsShadow: toBool(it.castsShadow, objDef?.castsShadow),
-      occludes: toBool(it.occludes, objDef?.occludes),
-      obstructsGround: toBool(it.obstructsGround, objDef?.obstructsGround),
-      impenetrable: toBool(it.impenetrable, objDef?.impenetrable),
-      solid: toBool(it.solid, objDef?.solid),
-      hollow: toBool(it.hollow, objDef?.hollow),
-      inverted: toBool(it.inverted, objDef?.inverted),
-      isUnwalkable: toBool(it.isUnwalkable, objDef?.isUnwalkable),
-      isSolidObject: toBool(it.isSolidObject, objDef?.isSolidObject),
-      aBoolean757: toBool(it.aBoolean757, objDef?.aBoolean757),
-      aBoolean764: toBool(it.aBoolean764, objDef?.aBoolean764),
-    };
-
-    out.push({
-      id,
-      plane,
-      x,
-      y,
-      type,
-      rot,
-      size: {
-        x: Number.isFinite(sizeX) ? sizeX : 1,
-        y: Number.isFinite(sizeY) ? sizeY : 1,
-      },
-      offsets,
-      translate,
-      scale,
-      modelSize,
-      lighting: { brightness, contrast, ambientLighting, lightDiffusion },
-      flags,
-      definition: objDef || null,
-      raw: it,
-    });
-  }
-  return out;
-}
-
-function toInt(...vals) {
-  for (const v of vals) {
-    if (v === undefined || v === null) continue;
-    const n = Number(v);
-    if (Number.isFinite(n)) return n | 0;
-    const p = parseInt(String(v), 10);
-    if (Number.isFinite(p)) return p | 0;
-  }
-  return NaN;
-}
-
-function toBool(...vals) {
-  for (const v of vals) {
-    if (v === undefined || v === null) continue;
-    if (typeof v === 'boolean') return v;
-    if (typeof v === 'number') {
-      if (Number.isNaN(v)) continue;
-      return v !== 0;
-    }
-    const str = String(v).trim().toLowerCase();
-    if (!str) continue;
-    if (str === 'true' || str === '1' || str === 'yes') return true;
-    if (str === 'false' || str === '0' || str === 'no') return false;
-  }
-  return undefined;
-}
-
-// Helpers to reuse loaded GLTF containers and track rendered instances.
-function ensureObjectCache(scene) {
-  scene.metadata = scene.metadata || {};
-  if (!scene.metadata._objectCache) {
-    scene.metadata._objectCache = {
-      containers: new Map(),
-      instances: new Map(),
-    };
-  }
-  return scene.metadata._objectCache;
-}
+const HARDWARE_INSTANCE_ALLOWLIST = new Set([890, 6959]);
+const HARDWARE_INSTANCE_BLOCKLIST = new Set();
 
 // POST map objects to GLTFs via backend, duplicating instances per location.
-async function renderFirstObjectFromBackend(scene, obj, ctx) {
-  const roots = await renderObjectsFromBackend(scene, [obj], ctx);
-  return roots[0] || null;
-}
-
 async function renderObjectsFromBackend(scene, objects, ctx) {
   if (!Array.isArray(objects) || objects.length === 0) return [];
 
@@ -362,6 +123,11 @@ async function renderObjectsFromBackend(scene, objects, ctx) {
       }
     }
 
+    const entryDefinition = entry.objectdef || null;
+    const instanceReport = evaluateHardwareInstanceEligibility(entry, entryDefinition, container);
+    logHardwareInstanceReport(instanceReport);
+
+
     return instantiateObjectInstances(scene, entry, occurrences, ctx, container, cache, key);
   });
 
@@ -369,20 +135,6 @@ async function renderObjectsFromBackend(scene, objects, ctx) {
   return renderedRootsNested.flat();
 }
 
-
-function toggleDebugBoundingBox(root, obj) {
-  if (!root || !obj) return;
-  if (DEBUG_OBJECT_TYPE === null) return;
-  const objType = Number(obj.type);
-  if (!Number.isFinite(objType) || objType !== (DEBUG_OBJECT_TYPE | 0)) return;
-  if (typeof root.showBoundingBox === 'boolean') {
-    root.showBoundingBox = true;
-  }
-  const meshes = root.getChildMeshes ? root.getChildMeshes(false) : [];
-  meshes.forEach((mesh) => {
-    if (mesh) mesh.showBoundingBox = true;
-  });
-}
 
 function instantiateSingleRoot(container, scene, entry, index, suffix = '') {
   try {
@@ -942,729 +694,83 @@ function placeObjectInstance(root, obj, footprint, ctx) {
   };
 }
 
-function rsScaleFactor(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n / 128 : 1;
-}
-
-function rsHorizontalOffset(value, tileSize) {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n === 0) return 0;
-  const size = Number.isFinite(tileSize) && tileSize !== 0 ? tileSize : 1;
-  return (n / 128) * size;
-}
-
-function rsVerticalOffset(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n / 128 : 0;
-}
-
-function applyLegacyModelScale(root, obj) {
+function toggleDebugBoundingBox(root, obj) {
   if (!root || !obj) return;
-  const baseScale = obj.scale || {};
-  const modelSize = obj.modelSize || {};
-  const scaleVec = new BABYLON.Vector3(
-    rsScaleFactor(baseScale.x) * rsScaleFactor(modelSize.x),
-    rsScaleFactor(baseScale.y) * rsScaleFactor(modelSize.h),
-    rsScaleFactor(baseScale.z) * rsScaleFactor(modelSize.y)
+  if (DEBUG_OBJECT_TYPE === null) return;
+  const objType = Number(obj.type);
+  if (!Number.isFinite(objType) || objType !== (DEBUG_OBJECT_TYPE | 0)) return;
+  if (typeof root.showBoundingBox === 'boolean') {
+    root.showBoundingBox = true;
+  }
+  const meshes = root.getChildMeshes ? root.getChildMeshes(false) : [];
+  meshes.forEach((mesh) => {
+    if (mesh) mesh.showBoundingBox = true;
+  });
+}
+
+// Helpers to reuse loaded GLTF containers and track rendered instances.
+function ensureObjectCache(scene) {
+  scene.metadata = scene.metadata || {};
+  if (!scene.metadata._objectCache) {
+    scene.metadata._objectCache = {
+      containers: new Map(),
+      instances: new Map(),
+    };
+  }
+  return scene.metadata._objectCache;
+}
+
+function evaluateHardwareInstanceEligibility(entry, definition, container) {
+  const objectId = Number(entry?.object_id ?? entry?.id ?? -1);
+  const typeId = Number(entry?.model_type ?? entry?.type ?? -1);
+  const passesAllowlist =
+    HARDWARE_INSTANCE_ALLOWLIST.size === 0 || HARDWARE_INSTANCE_ALLOWLIST.has(objectId);
+  const blockedByBlocklist = HARDWARE_INSTANCE_BLOCKLIST.has(objectId);
+  const hasInteractive = hasInteractiveActions(definition);
+  const animIdRaw = Number(definition?.animationID ?? definition?.animationId ?? -1);
+  const hasAnimationId = Number.isFinite(animIdRaw) && animIdRaw >= 0;
+  const hasAnimatedFaces = containerHasAnimatedFaces(container);
+  const eligible =
+    passesAllowlist &&
+    !blockedByBlocklist &&
+    !hasInteractive &&
+    !hasAnimationId &&
+    !hasAnimatedFaces;
+  return {
+    objectId,
+    typeId,
+    passesAllowlist,
+    blockedByBlocklist,
+    hasInteractiveActions: hasInteractive,
+    hasAnimationId,
+    hasAnimatedFaces,
+    eligible,
+  };
+}
+
+function hasInteractiveActions(definition) {
+  if (!definition) return false;
+  const actions = definition.actions;
+  if (!Array.isArray(actions) || actions.length === 0) return false;
+  return actions.some((action) => {
+    if (action == null) return false;
+    const str = String(action).trim().toLowerCase();
+    return str.length > 0 && str !== 'none';
+  });
+}
+
+function containerHasAnimatedFaces(container) {
+  if (!container || !Array.isArray(container.meshes)) return false;
+  return container.meshes.some((mesh) => {
+    const extras = mesh?.metadata?.gltf?.extras;
+    return extras && Array.isArray(extras.rs_animated_faces) && extras.rs_animated_faces.length > 0;
+  });
+}
+
+function logHardwareInstanceReport(report) {
+  if (!report) return;
+  console.log(
+    `[InstanceEligibility id=${report.objectId} type=${report.typeId}] eligible=${report.eligible}`,
+    report,
   );
-  if (
-    Math.abs(scaleVec.x - 1) < 1e-6 &&
-    Math.abs(scaleVec.y - 1) < 1e-6 &&
-    Math.abs(scaleVec.z - 1) < 1e-6
-  ) {
-    return;
-  }
-  const current = root.scaling ? root.scaling.clone() : BABYLON.Vector3.One();
-  current.x *= scaleVec.x;
-  current.y *= scaleVec.y;
-  current.z *= scaleVec.z;
-  root.scaling = current;
-}
-
-function applyLegacyTranslation(root, obj, tileSize) {
-  if (!root || !obj) return;
-  const translate = obj.translate || {};
-  const tx = rsHorizontalOffset(translate.x, tileSize);
-  const ty = rsVerticalOffset(translate.y);
-  const tz = rsHorizontalOffset(translate.z, tileSize);
-  if (Math.abs(tx) < 1e-4 && Math.abs(ty) < 1e-4 && Math.abs(tz) < 1e-4) return;
-  const localVec = new BABYLON.Vector3(tx, ty, tz);
-  let rotated = localVec;
-  if (root.rotationQuaternion) {
-    const mat = BABYLON.Matrix.FromQuaternion(root.rotationQuaternion);
-    rotated = BABYLON.Vector3.TransformCoordinates(localVec, mat);
-  }
-  root.position.addInPlace(rotated);
-}
-
-
-// Type-specific placement tweaks. Each case returns offsets/scale overrides tailored to legacy RS behavior.
-function applyTypeSpecificPlacement(obj, tileSize) {
-  if (!obj || typeof obj.type !== 'number') return null;
-  const type = obj.type | 0;
-  switch (type) {
-    case 0:
-    case 2:
-      return computeStraightWallPlacement(obj, tileSize);
-    case 1:
-      return computeDiagonalWallPlacement(obj, tileSize);
-    case 3:
-      return computeSquareCornerWallPlacement(obj, tileSize);
-    case 4:
-    case 5: {
-      const objId = Number(obj.id);
-      const forceThin = Number.isFinite(objId) && THIN_DECORATIONS.has(objId | 0);
-      return computeWallDecorationPlacement(obj, tileSize, forceThin);
-    }
-    case 10:
-      return computeRegularObjectPlacement(obj, tileSize);
-    case 11: {
-      const placement = computeRegularObjectPlacement(obj, tileSize);
-      if (placement) {
-        placement.yawOffset = (placement.yawOffset || 0) + Math.PI * 0.25;
-      }
-      return placement;
-    }
-    case 22:
-      return computeFloorObjectPlacement(obj, tileSize);
-    default:
-      return null;
-  }
-}
-
-
-
-
-
-
-// Straight wall (type 0).
-// RS cache stores four segments end-to-end at smaller scale; map axes are flipped (RS X -> Babylon Z).
-// Stretch along tile length, keep native thin depth, add 90 degrees yaw, hug tile edge.
-function computeStraightWallPlacement(obj, tileSize) {
-  const size = Number.isFinite(tileSize) && tileSize > 0 ? tileSize : 1;
-  const rotSteps = (obj.rot | 0) & 3;
-  const thickness = size * 0.5;
-  const halfWall = 0.5 * thickness;
-  const isType2Leg = (obj?.type | 0) === 2 || obj?.__type2Secondary || obj?.__type2Primary;
-  const edgeFactor = 0.45;
-  const offsetMagnitude = (size * edgeFactor) - halfWall;
-  const spanWidth = isType2Leg ? (size + 0.4 * thickness) : size;
-  let offsetX = 0;
-  let offsetZ = 0;
-  switch (rotSteps) {
-    case 0:
-      offsetZ -= offsetMagnitude;
-      break;
-    case 1:
-      offsetX += offsetMagnitude;
-      break;
-    case 2:
-      offsetZ += offsetMagnitude;
-      break;
-    case 3:
-      offsetX -= offsetMagnitude;
-      break;
-    default:
-      break;
-  }
-  const yawOffset = Math.PI * 0.5;
-  return {
-    desiredWidthLocal: spanWidth,
-    desiredDepthLocal: size * 0.1,
-    worldOffset: { x: offsetX, y: 0, z: offsetZ },
-    yawOffset,
-    scale: {
-      // Straight walls look closer to the RS client when height is doubled.
-      desiredHeight: size * 2.05,
-    },
-  };
-}
-
-// Wall corner (type 1).
-// Keep diagonal geometry but clamp thickness so it matches straight walls.
-function computeDiagonalWallPlacement(obj, tileSize) {
-  const size = Number.isFinite(tileSize) && tileSize > 0 ? tileSize : 1;
-  const thickness = size * 0.1;
-  const yawOffset = Math.PI * 1;
-  const rotSteps = (obj.rot | 0) & 3;
-  const edgeOffset = 1.05*thickness;
-  let offsetX = 0;
-  let offsetZ = 0;
-
-  switch (rotSteps) {
-    case 0: // north-west corner
-      offsetX -= edgeOffset;
-      offsetZ += edgeOffset;
-      break;
-    case 1: // north-east corner
-      offsetX -= edgeOffset;
-      offsetZ -= edgeOffset;
-      break;
-    case 2: // south-east corner
-      offsetX += edgeOffset;
-      offsetZ -= edgeOffset;
-      break;
-    case 3: // south-west corner
-      offsetX += edgeOffset;
-      offsetZ += edgeOffset;
-      break;
-    default:
-      break;
-  }
-
-  const cosYaw = Math.cos(-yawOffset);
-  const sinYaw = Math.sin(-yawOffset);
-  const adjustedOffsetX = offsetX * cosYaw - offsetZ * sinYaw;
-  const adjustedOffsetZ = offsetX * sinYaw + offsetZ * cosYaw;
-  return {
-    desiredWidthLocal: thickness,
-    desiredDepthLocal: thickness,
-    yawOffset,
-    worldOffset: { x: adjustedOffsetX, y: 0, z: adjustedOffsetZ },
-    scale: {
-      desiredHeight: size * 2.05,
-    },
-  };
-}
-
-// Square corner wall (type 3).
-// Uses same thin thickness on both axes so the post hugs a tile corner.
-// Offsets push the mesh into the correct corner based on rotation.
-function computeSquareCornerWallPlacement(obj, tileSize) {
-  const size = Number.isFinite(tileSize) && tileSize > 0 ? tileSize : 1;
-  const rotSteps = (obj.rot | 0) & 3;
-  const thickness = size * 0.1;
-  const halfSpan = thickness ;
-  const edgeOffset = 0.5 * (size - halfSpan);
-
-  let offsetX = 0;
-  let offsetZ = 0;
-  switch (rotSteps) {
-    case 0: // north-west corner
-      offsetX -= 1.10*edgeOffset;
-      offsetZ -= 0.8*edgeOffset;
-      break;
-    case 1: // north-east corner
-      offsetX += 0.8*edgeOffset;
-      offsetZ -= 1.1*edgeOffset;
-      break;
-    case 2: // south-east corner
-      offsetX += 1.2*edgeOffset;
-      offsetZ += 0.85*edgeOffset;
-      break;
-    case 3: // south-west corner
-      offsetX -= 0.75*edgeOffset;
-      offsetZ += 1.15*edgeOffset;
-      break;
-    default:
-      break;
-  }
-
-  const yawOffset = -Math.PI * 0.5;
-  const cosYaw = Math.cos(-yawOffset);
-  const sinYaw = Math.sin(-yawOffset);
-  const adjustedOffsetX = offsetX * cosYaw - offsetZ * sinYaw;
-  const adjustedOffsetZ = offsetX * sinYaw + offsetZ * cosYaw;
-  return {
-    desiredWidthLocal: thickness,
-    desiredDepthLocal: thickness,
-    worldOffset: { x: adjustedOffsetX, y: 0, z: adjustedOffsetZ },
-    yawOffset: yawOffset,
-    scale: {
-      desiredHeight: size * 2.05,
-    },
-  };
-}
-
-// Wall decoration (type 4 or 5).
-// Keep mesh proportions but stretch the longest axis to one tile.
-function computeWallDecorationPlacement(obj, tileSize, forceThin = false) {
-  const size = Number.isFinite(tileSize) && tileSize > 0 ? tileSize : 1;
-  const thickness = size * 0.1;
-  const yawOffset = Math.PI * 0.5;
-  let offsetX = 0;
-  let offsetY = size * 0.5;
-  let offsetZ = 0;
-  const edgeOffset = forceThin ? 0.3 * (size - thickness) : -0.1 * (size - thickness);
-  const rotSteps = (obj.rot | 0) & 3;
-
-  switch (rotSteps) {
-    case 0:
-      offsetX -= edgeOffset;
-      offsetZ += 0;
-      break;
-    case 1:
-      offsetX += 0;
-      offsetZ += edgeOffset;
-      break;
-    case 2:
-      offsetX -= edgeOffset;
-      offsetZ += 0;
-      break;
-    case 3:
-      offsetX -= 0;
-      offsetZ -= edgeOffset;
-      break;
-    default:
-      break;
-  }
-
-  const forcedKey = `${obj?.type | 0}-${obj?.id | 0}`;
-  if (FORCED_TYPE_TRANSLATIONS.has(forcedKey)) {
-    const translations = FORCED_TYPE_TRANSLATIONS.get(forcedKey);
-    offsetX += translations[0];
-    offsetZ += translations[1];
-    if(translations.length === 3){
-      offsetY += translations[2];
-    }
-  }
-
-  const cosYaw = Math.cos(-yawOffset);
-  const sinYaw = Math.sin(-yawOffset);
-  const adjustedOffsetX = offsetX * cosYaw - offsetZ * sinYaw;
-  const adjustedOffsetZ = offsetX * sinYaw + offsetZ * cosYaw;
-  
-  
-
-  return {
-    desiredWidthLocal: size,
-    desiredDepthLocal: forceThin ? size * 0.05 : size,
-    worldOffset: { x: adjustedOffsetX, y: offsetY, z: adjustedOffsetZ },
-    yawOffset,
-    scale: {
-      wallSpanZ: size,
-      maxDepthX: forceThin ? size * 0.05 : size * 0.5,
-    },
-  };
-}
-// diagonal Wall (type 9).
-// No Changes
-
-// Regular ground objects (type 10) - rotate to match RS client and scale longest axis to a tile.
-function computeRegularObjectPlacement(obj, tileSize) {
-  const size = Number.isFinite(tileSize) && tileSize > 0 ? tileSize : 1;
-  let offsetX = 0;
-  let offsetY = 0;
-  let offsetZ = 0;
-  let edgeOffset = 0;//-(0.75 - 0.5*size);
-  const rotSteps = (obj.rot | 0) & 3;
-  const widthTiles = Number.isFinite(obj?.size?.x) ? obj.size.x : 1;
-  const depthTiles = Number.isFinite(obj?.size?.y) ? obj.size.y : 1;
-  if(widthTiles > 1 || depthTiles > 1) {
-    edgeOffset = 0.5
-  }
-  let yawOffset = Math.PI * 0.5;
-  const forcedKey = `${obj?.type | 0}-${obj?.id | 0}`;
-  if (FORCED_TYPE_ROTATIONS.has(forcedKey)) {
-    yawOffset += FORCED_TYPE_ROTATIONS.get(forcedKey);
-  }
-
-  switch (rotSteps) {
-    case 0:
-      offsetX += edgeOffset;
-      offsetZ += edgeOffset;
-    case 1:
-      offsetX -= edgeOffset;
-      offsetZ -= edgeOffset;
-      break;
-    case 2:
-      offsetX += edgeOffset; // to be rechecked later
-      offsetZ += edgeOffset; // to be rechecked later
-      break;
-    case 3:
-      offsetX -= edgeOffset;
-      offsetZ -= edgeOffset;
-      break;
-    default:
-      break;
-  }
-
-  if (FORCED_TYPE_TRANSLATIONS.has(forcedKey)) {
-    const translations = FORCED_TYPE_TRANSLATIONS.get(forcedKey);
-    offsetX += translations[0];
-    offsetZ += translations[1];
-    if(translations.length === 3){
-      offsetY = translations[2];
-    }
-  }
-
-  const cosYaw = Math.cos(-yawOffset);
-  const sinYaw = Math.sin(-yawOffset);
-  const adjustedOffsetX = offsetX * cosYaw - offsetZ * sinYaw;
-  const adjustedOffsetZ = offsetX * sinYaw + offsetZ * cosYaw;
-  
-  
-  return {
-    yawOffset,
-    worldOffset: { x: adjustedOffsetX, y: offsetY, z: adjustedOffsetZ },
-    scale: {
-      fitLongestAxis: size,
-    },
-  };
-}
-
-// type 22
-
-function computeFloorObjectPlacement(obj, tileSize) {
-  const size = Number.isFinite(tileSize) && tileSize > 0 ? tileSize : 1;
-  let yawOffset = Math.PI * 1.5;
-  let offsetX = 0;
-  let offsetZ = 0;
-  const edgeOffset = 0*size;
-  const rotSteps = (obj.rot | 0) & 3;
-  const forcedKey = `${obj?.type | 0}-${obj?.id | 0}`;
-  if (FORCED_TYPE_ROTATIONS.has(forcedKey)) {
-    yawOffset += FORCED_TYPE_ROTATIONS.get(forcedKey);
-  }
-
-  switch (rotSteps) {
-    case 0:
-      offsetX += edgeOffset;
-      offsetZ += 0;
-      break;
-    case 1:
-      offsetX += 0;
-      offsetZ -= edgeOffset;
-      break;
-    case 2:
-      offsetX += edgeOffset;
-      offsetZ += 0;
-      break;
-    case 3:
-      offsetX -= 0;
-      offsetZ += edgeOffset;
-      break;
-    default:
-      break;
-  }
-
-  const cosYaw = Math.cos(-yawOffset);
-  const sinYaw = Math.sin(-yawOffset);
-  const adjustedOffsetX = offsetX * cosYaw - offsetZ * sinYaw;
-  const adjustedOffsetZ = offsetX * sinYaw + offsetZ * cosYaw;
-  return {
-    yawOffset,
-    worldOffset: { x: adjustedOffsetX, y: size * 0.01, z: adjustedOffsetZ},
-  };
-}
-
-
-
-
-function promptPickObjectsJson() {
-  return new Promise((resolve, reject) => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json,application/json';
-    input.style.position = 'fixed';
-    input.style.left = '-9999px';
-    document.body.appendChild(input);
-    input.addEventListener('change', async () => {
-      try {
-        const file = input.files && input.files[0];
-        if (!file) { reject(new Error('No file selected')); return; }
-        const text = await file.text();
-        const data = JSON.parse(text);
-        resolve(normalizeObjectEntries(data));
-      } catch (e) { reject(e); }
-      finally { input.remove(); }
-    });
-    input.click();
-  });
-}
-
-const THIN_DECORATIONS = new Set([6959, 6960, 6963, 6964]);
-
-const FORCED_TYPE_TRANSLATIONS = new Map([
-  // key: `${type}-${id}` -> x and z translations
-  //["4-6963",[0,0.1]],
-  //["4-6964",[0,0.1]],
-  ["10-2725",[-0.5,-0.475]],
-  ["10-836",[0.5,0.5,1]],
-  ["10-610",[0.5,0.5]],
-  ["10-595",[-0.5,-0.5]],
-]);
-
-const FORCED_TYPE_ROTATIONS = new Map([
-  // key: `${type}-${id}` -> radians to add
-  ["10-409", Math.PI],
-  ["10-610", Math.PI],
-  ["10-820", Math.PI],
-  ['10-3500', Math.PI],
-  ["10-5788", Math.PI],
-  ["10-9160", Math.PI],
-  ["10-9514", Math.PI],
-  ["22-917", -0.5*Math.PI],
-  ["22-928", -0.5*Math.PI],
-  ["22-934", -0.5*Math.PI],
-  ["22-940", -0.5*Math.PI],
-]);
-
-
-
-function makeMeshGeometryUpdatable(mesh) {
-  if (!mesh || typeof mesh.getVertexBuffer !== 'function') return;
-  if (typeof mesh.makeGeometryUnique === 'function') {
-    try {
-      mesh.makeGeometryUnique();
-    } catch (_) {}
-  }
-  const kinds = [
-    BABYLON.VertexBuffer.PositionKind,
-    BABYLON.VertexBuffer.NormalKind,
-    BABYLON.VertexBuffer.ColorKind,
-    BABYLON.VertexBuffer.UVKind,
-  ];
-  kinds.forEach((kind) => {
-    if (!mesh.isVerticesDataPresent || !mesh.isVerticesDataPresent(kind)) return;
-    const vb = mesh.getVertexBuffer(kind);
-    if (vb && !vb.isUpdatable()) {
-      const data = mesh.getVerticesData(kind, true, true);
-      if (data) {
-        mesh.updateVerticesData(kind, data, true, true);
-      }
-    }
-  });
-}
-
-async function registerAnimatedObjectTextures(scene, mesh) {
-  if (!mesh || !scene || !scene.metadata) return;
-  const animator = scene.metadata.objectTextureAnimator;
-  if (!animator || !animator.animatedIds || animator.animatedIds.size === 0) return;
-
-  const forcedAnimatedMap = collectAnimatedTextureDataFromExtras(mesh);
-  const restrictToExtras = forcedAnimatedMap.size > 0;
-  if (!restrictToExtras) return;
-  const materials = new Set();
-  if (mesh.material) materials.add(mesh.material);
-  if (typeof mesh.getChildMeshes === 'function') {
-    mesh.getChildMeshes(false).forEach((child) => {
-      if (child.material) materials.add(child.material);
-    });
-  }
-  if (materials.size === 0) return;
-
-  const textureSlots = [
-    'albedoTexture',
-    'diffuseTexture',
-    'opacityTexture',
-    'emissiveTexture',
-    'reflectionTexture',
-    'metallicTexture',
-  ];
-
-  for (const material of materials) {
-    console.log("material: ", material);
-    for (const slot of textureSlots) {
-      console.log("slot: ", slot)
-      const tex = material[slot];
-      console.log("tex: ", tex);
-      if (!tex) continue;
-      const texId = extractTextureIdFromUrl(tex.url || tex.name || '');
-      if (texId < 0) continue;
-      const faceList = forcedAnimatedMap.get(texId);
-      if (!faceList || faceList.length === 0) continue;
-      console.log("facelist: ", faceList);
-      if (tex.onLoadObservable && !tex.isReady()) {
-        tex.onLoadObservable.addOnce(() => {
-          maybeAttachAnimatedTexture(scene, animator, material, slot, tex, texId, faceList).catch((err) => {
-            console.warn('maybeAttachAnimatedTexture deferred failed', err);
-          });
-        });
-        continue;
-      }
-      console.log("about the caall maybeAttachAnimatedTexture");
-      await maybeAttachAnimatedTexture(scene, animator, material, slot, tex, texId, faceList);
-    }
-  }
-}
-
-function collectAnimatedTextureDataFromExtras(mesh) {
-  const map = new Map();
-  if (!mesh) return map;
-  const gltfMeta = mesh?.metadata?.gltf || {};
-  const extras = gltfMeta.extras;
-  if (extras && Array.isArray(extras.rs_animated_faces)) {
-    extras.rs_animated_faces.forEach((entry) => {
-      if (!Array.isArray(entry) || entry.length < 2) return;
-      const faceIdx = entry[0];
-      const texId = entry[1];
-      if (!Number.isFinite(texId)) return;
-      const key = texId | 0;
-      if (!map.has(key)) {
-        map.set(key, []);
-      }
-      if (Number.isFinite(faceIdx)) {
-        map.get(key).push(faceIdx | 0);
-      }
-    });
-  }
-  return map;
-}
-
-async function maybeAttachAnimatedTexture(scene, animator, material, slot, sourceTexture, texIdOverride, faceList) {
-  if (!sourceTexture) return;
-  const extracted = Number.isFinite(texIdOverride)
-    ? texIdOverride
-    : extractTextureIdFromUrl(sourceTexture.url || sourceTexture.name || '');
-  const texId = extracted | 0;
-  if (!animator.animatedIds.has(texId)) return;
-
-  const entry = await ensureAnimatedObjectTexture(scene, animator, texId, sourceTexture);
-  if (!entry || !entry.dynamicTexture) return;
-  if (faceList && faceList.length) {
-    entry.faces = entry.faces || [];
-    entry.faces.push(...faceList);
-  }
-  if (material[slot] === entry.dynamicTexture) return;
-
-  //material[slot] = entry.dynamicTexture;
-  if (material[slot] !== entry.dynamicTexture) {
-    material[slot] = entry.dynamicTexture;
-    if (typeof material.markAsDirty === 'function') {
-      material.markAsDirty(BABYLON.Material.TextureDirtyFlag);
-    }
-  }
-  entry.targets = entry.targets || [];
-  entry.targets.push({ material, slot });
-}
-
-function extractTextureIdFromUrl(url) {
-  if (!url || typeof url !== 'string') return -1;
-  const match = url.match(/texture_(\d+)\.png/i);
-  if (!match) return -1;
-  return Number(match[1]) | 0;
-}
-
-function resolveTextureUrl(sourceTexture) {
-  if (!sourceTexture) return null;
-  const raw = sourceTexture.url || sourceTexture.name || '';
-  if (!raw) return null;
-  if (raw.startsWith('data:')) {
-    const trimmed = raw.slice(5); // drop "data:"
-    if (!trimmed) return null;
-    return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
-  }
-  return raw;
-}
-
-async function ensureAnimatedObjectTexture(scene, animator, texId, sourceTexture) {
-  if (animator.entries.has(texId)) {
-    const existing = animator.entries.get(texId);
-    if (existing.dynamicTexture) return existing;
-  }
-
-  const imageUrl = resolveTextureUrl(sourceTexture);
-  if (!imageUrl) return null;
-  const img = await loadImageElement(imageUrl);
-  const canvas = document.createElement('canvas');
-  canvas.width = img.width;
-  canvas.height = img.height;
-  const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, 0, 0);
-
-  const dyn = new BABYLON.DynamicTexture(`objAnim_${texId}`, { width: canvas.width, height: canvas.height }, scene, false);
-  const texCtx = dyn.getContext();
-  texCtx.imageSmoothingEnabled = false;
-  texCtx.drawImage(canvas, 0, 0);
-  dyn.update();
-  dyn.hasAlpha = !!sourceTexture.hasAlpha;
-  dyn.wrapU = BABYLON.Texture.WRAP_ADDRESSMODE;
-  dyn.wrapV = BABYLON.Texture.WRAP_ADDRESSMODE;
-
-  const speedDef = animator.speedMap?.get(texId) || { x: 0, y: 0 };
-  const TICK_MS = 20;
-  const entry = {
-    id: texId,
-    canvas,
-    ctx,
-    dynamicTexture: dyn,
-    offsets: new Float32Array([0, 0]),
-    speed: {
-      x: (speedDef.x || 0) / TICK_MS,
-      y: (speedDef.y || 0) / TICK_MS,
-    },
-    targets: [],
-    baseImage: img,
-  };
-  animator.entries.set(texId, entry);
-  return entry;
-}
-
-function loadImageElement(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(img);
-    img.onerror = (err) => reject(err);
-    img.src = url;
-  });
-}
-
-function cloneMetadata(meta) {
-  if (!meta) return null;
-  try {
-    return JSON.parse(JSON.stringify(meta));
-  } catch {
-    return meta;
-  }
-}
-
-const loggedMissingMetadata = new WeakSet();
-
-function copyGltfMetadataFromSource(mesh) {
-  if (!mesh) return;
-  const already = mesh.metadata && mesh.metadata.gltf && mesh.metadata.gltf.extras;
-  const geoAlready = mesh.geometry && mesh.geometry.metadata && mesh.geometry.metadata.rs_to_gltf;
-  if (already && already.rs_to_gltf && geoAlready) return;
-
-  const source =
-    mesh._source ||
-    mesh._sourceMesh ||
-    mesh.source ||
-    mesh.sourceMesh ||
-    (mesh._original && mesh._original.source);
-
-  let sourceExtras =
-    source &&
-    source.metadata &&
-    source.metadata.gltf &&
-    source.metadata.gltf.extras;
-
-  if ((!sourceExtras || !sourceExtras.rs_to_gltf) && mesh.parent) {
-    const parentExtras =
-      mesh.parent.metadata &&
-      mesh.parent.metadata.gltf &&
-      mesh.parent.metadata.gltf.extras;
-    if (parentExtras && parentExtras.rs_to_gltf) {
-      sourceExtras = parentExtras;
-    }
-  }
-
-  if (!sourceExtras || !sourceExtras.rs_to_gltf) {
-    if (source && source.metadata && !loggedMissingMetadata.has(source)) {
-      console.warn(
-        '[AnimationStore] Missing rs_to_gltf extras on source mesh',
-        source.name || source.id,
-        source.metadata,
-      );
-      loggedMissingMetadata.add(source);
-    }
-    return;
-  }
-
-  const clonedExtras = cloneMetadata(sourceExtras);
-  mesh.metadata = mesh.metadata || {};
-  mesh.metadata.gltf = mesh.metadata.gltf || {};
-  mesh.metadata.gltf.extras = clonedExtras;
-  if (Array.isArray(source?.metadata?.gltf?.primitives)) {
-    mesh.metadata.gltf.primitives = cloneMetadata(source.metadata.gltf.primitives);
-  }
-
-  if (mesh.geometry) {
-    mesh.geometry.metadata = mesh.geometry.metadata || {};
-    mesh.geometry.metadata.rs_to_gltf = cloneMetadata(sourceExtras.rs_to_gltf);
-  }
 }
